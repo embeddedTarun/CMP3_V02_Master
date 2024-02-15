@@ -668,6 +668,8 @@ while ( hold == 1 )
 
 void start_fun(void)
 {
+       int steps_count = 0;
+       int shots_count = 0;
 
 	   //old_home_pos = home_pos;
 
@@ -675,9 +677,11 @@ void start_fun(void)
 	   if (motor_lr == 1) { lcd_string_new("R"); } else { lcd_string_new("L");}
 	 //  lcd_put_cur(1,10); lcd_int_to_str(old_home_pos );
 	   lcd_put_cur(2, 0); lcd_string_new("Go Home?  N<-->Y");
+	   read_joystic(); HAL_Delay(2);
 
 	   while( x_value <= 2500 && x_value > 1000 )
 	  {
+		  read_joystic(); HAL_Delay(2);
 	   		 if (x_value <= 900) // Yes
 	   	 {
 	   		lcd_put_cur(1,10); lcd_int_to_str(old_home_pos);
@@ -688,30 +692,32 @@ void start_fun(void)
 	    	lcd_put_cur(1,10); lcd_int_to_str( home_pos );
 	   	 }
 	  }
-
+	   HAL_Delay(1);
+	   lcd_put_cur(2,0); lcd_string_new("                ");
+	   lcd_put_cur(2,0); lcd_int_to_str(steps_count);
+	   lcd_put_cur(2,0); lcd_string_new("/");
 	   lcd_put_cur(2,3); lcd_int_to_str(steps);
 	   lcd_put_cur(2,8); float_to_string(step);
-
-	   lcd_put_cur(2,12); lcd_int_to_str(shots);
-
+	   lcd_put_cur(2,16); lcd_int_to_str(shots_count);
+	   lcd_put_cur(2,15); lcd_string_new("/");
+	   lcd_put_cur(2,16); lcd_int_to_str(shots);
 
 
 	    button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+	    read_joystic(); HAL_Delay(2);
 
-	    while (button !=0 && start_flag == 1 )	 /////// pause and exit scan
+	    while (button != 0  )	 /////// pause and exit scan
 	{
 
 
-
 		button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-
-
-
+		read_joystic(); HAL_Delay(2);
 
         ///// button press once /////
 
 		if (button == 0)
 		{
+
 			lcd_clear(); lcd_put_cur(1, 5); lcd_string_new("PAUSE");  lcd_put_cur(1,14); lcd_int_to_str(shots);
 			lcd_put_cur(1, 0); lcd_string_new("Press OK To Exit");
 			button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
@@ -719,16 +725,14 @@ void start_fun(void)
 			button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
 	/////   button press second time      /////
           if(button == 0) { start_flag = 0; }
-    	}
+        }
 
 		///// call back to the animation mode
-		 HAL_Delay(2);
-		 animation_fun();
-
-	   }
+	}
+	    HAL_Delay(2);
+	    animation_fun();
 
 }
-
 
 
 
