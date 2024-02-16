@@ -145,7 +145,8 @@ crc_t CRC_CHECK_decode(crc_t* message, crc_t polynomial, int nBytes );
 ///////  485     ////
 
 //uint8_t* send_buffer="h---Lcd\r\n";
-uint8_t send_buffer[10]={0x55,'-','-','-','L','c','d','\r','\n',0x01};
+//uint8_t send_buffer[10]={0x55,'-','-','-','L','c','d','\r','\n',0x01};
+uint8_t send_buffer[10]={0x55,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0x01};
 uint8_t Previous_buffer[10];
 uint8_t RECIEVE_VALID_DATA[10];
 uint8_t recieve_buffer[10];
@@ -1066,7 +1067,9 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-
+  HAL_Delay(50);
+  send_buffer[1]=0x46;send_buffer[2]=0x54;
+send_on_rs485(send_buffer);
   HAL_GPIO_WritePin(jbtn_GPIO_Port, joy_btn_Pin, 1);
   lcd_put_cur(1, 0); lcd_string_new("CAMERA SLIDER 03");
   HAL_Delay(1); lcd_put_cur(2, 0); lcd_string_new("ROUND SHAPE SLIDE");
