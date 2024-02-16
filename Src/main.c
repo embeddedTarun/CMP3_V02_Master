@@ -65,6 +65,7 @@ UART_HandleTypeDef huart1;
 
 #define joy_btn_Pin GPIO_PIN_10
 #define jbtn_GPIO_Port  GPIOB
+
 //#define x_channel ADC_Select_4
 //#define y_channel ADC_Select_5
 uint32_t adc_value = 0;
@@ -82,6 +83,7 @@ float limit_1 = 0.0f;   	 // motor limit_1 value
 float limit_2 = 0.0f;   	 // motor limit_2 value
 float motor_step = 0.0;      // final motor steps after setting limit_1 and limit_2
 uint8_t motor_dir = 0;        // motor direction status 1 = Left /reverse and 2 = RIGHT / Forward
+
 uint8_t man_mode = 0;
 uint8_t unl_mode = 0;
 uint8_t man_flag = 0;
@@ -91,13 +93,15 @@ uint8_t frpv_flag = 0;
 uint8_t exit_flag = 0;
 uint8_t start_flag;
 
-unsigned int  home_pos = 0;
-unsigned int  old_home_pos = 0;
-float step = 0.0;
-uint8_t steps = 0;
-uint8_t shots = 0;
-uint8_t  delay_val = 0;
-uint8_t  motor_lr =  0;
+unsigned int  home_pos = 0;  // home position in animation mode
+float  old_home_pos = 0.0;   // old position in animation mode
+float new_home_pos = 0.0;    // new position in animation mode
+float current_pos = 0.0;     // current position in animation mode
+float step = 0.0;            // motor will move step to left or right in animation mode
+uint8_t steps = 0;          // total steps of the shots taken in animation mode
+uint8_t shots = 0;          // No of shorts to be taken in animation
+uint8_t  delay_val = 0;     // delay between the each short
+uint8_t  motor_lr =  0;     // motor direction Left or Right
 
 crc_t POLYNOMIAL = 0xcb;
 
@@ -145,14 +149,19 @@ crc_t CRC_CHECK_decode(crc_t* message, crc_t polynomial, int nBytes );
 ///////  485     ////
 
 //uint8_t* send_buffer="h---Lcd\r\n";
-uint8_t send_buffer[10]={0x55,'-','-','-','L','c','d','\r','\n',0x01};
+//uint8_t send_buffer[10]={0x55,'-','-','-','L','c','d','\r','\n',0x01};
+
+uint8_t send_buffer[10] = {0x55,'F',0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x01};
+
 uint8_t Previous_buffer[10];
 uint8_t RECIEVE_VALID_DATA[10];
 uint8_t recieve_buffer[10];
 
 uint8_t RS_485_Data_validate=0;
 int BUFFER_LENGTH=10;
-uint8_t state_of_rs485=1;
+
+uint8_t state_of_rs485 = 1;
+
 //char buffer1[9]="Driver2\r\n";
 //uint8_t buffer[14];
 int counter;
@@ -160,6 +169,14 @@ uint8_t cnt =0;
 
 
 /// home screen message /////
+
+
+long map(long x, long in_min, long in_max, long out_min, long out_max)
+	{
+	return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+	}
+
+
   void home_scr(void)
   {
 	  lcd_put_cur(1, 1);
@@ -188,7 +205,7 @@ uint8_t cnt =0;
   	  }
 
    	 HAL_ADC_Start(&hadc1);
-   	 HAL_ADC_PollForConversion(&hadc1, 4000);
+   	 HAL_ADC_PollForConversion(&hadc1, 100 );  //      4095);
    	 adc_value = HAL_ADC_GetValue(&hadc1);
      return(adc_value);
 
@@ -332,41 +349,104 @@ void back_dis()
 
 
 
+
+
+
+
+
+
 void free_ride_fun()
 {
+//	int js_toggle = 0;
+	int speed_send = 0;
 	hold = 0;
     fr_flag = 0;
-float count = motor_step;     //value1;
+//float count = motor_step;     //value1;
     lcd_clear();
-	lcd_put_cur(1, 0); lcd_string_new("FreeRide  "); lcd_put_cur(1, 10); float_to_string(count);
-	lcd_put_cur(2, 0); lcd_string_new(" 1     0     15 ");
+	lcd_put_cur(1, 0); lcd_string_new("FreeRide  "); lcd_put_cur(1, 10); //float_to_string(count);
+	lcd_put_cur(2, 0); lcd_string_new(" 1           15 ");
 	HAL_Delay(1000); // debounce dealy
 
     button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
     read_joystic(); //HAL_Delay(5);
 
-    while (button != 0 )
-    {
-        button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-    	read_joystic(); HAL_Delay(5);
+    lcd_int_to_str(speed_send);
 
-    	if ((x_value <= 700) && ( x_value >= 0 ))  //// 1st limit increment
-    	   {
-    		 if (count < motor_step ) {
-    		    	count = count + 0.1; lcd_put_cur(1, 10); float_to_string(count);
-    		      }
+    /// ************************
+       while (button != 0 )
+       {
+           button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+           read_joystic(); HAL_Delay(5);
+      //     lcd_put_cur(2, 4);  lcd_string_new("      ");
 
-    		      HAL_Delay(150);
-   		    }
+         if ((x_value <= 2050 ) && ( x_value >= 1950))
+         {
+        	 HAL_Delay(2);
+        	 speed_send = 000;
+        	 lcd_put_cur(2, 7); lcd_int_to_str(speed_send);
 
-    	else if ((x_value >= 3000) && (x_value < 4095)) // 1st limit decrement
-    		{
-               	  if (count > 0.1) {
-    			     count = count - 0.1; lcd_put_cur(1, 10); float_to_string(count);
-              	    }
-    		      HAL_Delay(150);
-    		}
-      }
+         }
+         if (x_value >= 2100)
+       	      {
+        	   speed_send = map( x_value,  2100, 0, 0, 100);
+        	   lcd_put_cur(2, 7);  lcd_int_to_str(speed_send);
+               lcd_put_cur(1, 14);  lcd_string_new("L");
+               HAL_Delay(5);
+               send_buffer[02] = speed_send;
+               while(state_of_rs485 != 1);
+               send_on_rs485(send_buffer);
+               HAL_Delay(1);
+
+       	      }
+
+       	 if (x_value <= 1900) // 1st limit decrement
+       		{
+
+       		    speed_send = map( x_value, 1900, 0, 0, 100);
+                lcd_put_cur(2, 7);  lcd_int_to_str(speed_send);
+                lcd_put_cur(1, 14);  lcd_string_new("R");
+                HAL_Delay(5);
+                send_buffer[02] = speed_send;
+                while(state_of_rs485 != 1);
+                send_on_rs485(send_buffer);
+                HAL_Delay(1);
+       		}
+
+       }
+
+    // **********************************
+
+
+
+
+
+//
+// /// ************************
+//    while (button != 0 )
+//    {
+//        button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+//    	read_joystic(); HAL_Delay(5);
+//
+//    	if ((x_value <= 700) && ( x_value >= 0 ))  //// 1st limit increment
+//    	   {
+//    		 if (count < motor_step ) {
+//    		    	count = count + 0.1; lcd_put_cur(1, 10); float_to_string(count);
+//    		      }
+//
+//    		      HAL_Delay(150);
+//   		    }
+//
+//    	else if ((x_value >= 3000) && (x_value < 4095)) // 1st limit decrement
+//    		{
+//               	  if (count > 0.1) {
+//    			     count = count - 0.1; lcd_put_cur(1, 10); float_to_string(count);
+//              	    }
+//    		      HAL_Delay(150);
+//    		}
+//      }
+// // **********************************
+//
+
 
 	  //////////// calling to the live function again in loop
     //    frpv_flag = 1;
@@ -670,67 +750,116 @@ void start_fun(void)
 {
        int steps_count = 0;
        int shots_count = 0;
+       int wait = 0;
+       int toggle = 0;
+       new_home_pos = home_pos;
+       wait = delay_val*1000;
+       current_pos = current_pos + home_pos;
 
-	   //old_home_pos = home_pos;
-
-	   lcd_put_cur(1, 1); lcd_string_new("ANIM  dir"); lcd_put_cur(1,10);
+  	while (start_flag == 1)
+  	{
+  	   toggle = 1;
+       lcd_put_cur(1, 1); lcd_string_new("ANIM  dir"); lcd_put_cur(1,10);
 	   if (motor_lr == 1) { lcd_string_new("R"); } else { lcd_string_new("L");}
-	 //  lcd_put_cur(1,10); lcd_int_to_str(old_home_pos );
-	   lcd_put_cur(2, 0); lcd_string_new("Go Home?  N<-->Y");
-	   read_joystic(); HAL_Delay(2);
 
-	   while( x_value <= 2500 && x_value > 1000 )
-	  {
-		  read_joystic(); HAL_Delay(2);
-	   		 if (x_value <= 900) // Yes
-	   	 {
-	   		lcd_put_cur(1,10); lcd_int_to_str(old_home_pos);
-    	 }
+//	   if (old_home_pos != new_home_pos)
+//	   {
+//		   lcd_put_cur(1,12); lcd_int_to_str( new_home_pos);
+//		   lcd_put_cur(2, 0); lcd_string_new("Go Home?  N<-->Y");
+//		   read_joystic(); HAL_Delay(2);
+//	    while( x_value <= 2500 && x_value > 1000 )
+//		   {    read_joystic(); HAL_Delay(2);
+//		       if (x_value <= 900) // Yes
+//		          {  lcd_put_cur(1,12); float_to_string( new_home_pos); }
+//
+//		     else if (x_value >= 3000)  // No
+//		     	  {	lcd_put_cur(1,12); float_to_string( old_home_pos ); }
+//		   }
+//         }
+//
+//	   else {  lcd_put_cur(1,12); lcd_int_to_str(old_home_pos );  }
 
-	    else if (x_value >= 3000)  // No
-	   	 {
-	    	lcd_put_cur(1,10); lcd_int_to_str( home_pos );
-	   	 }
-	  }
-	   HAL_Delay(1);
-	   lcd_put_cur(2,0); lcd_string_new("                ");
+
+	   lcd_put_cur(1,12); float_to_string(current_pos);
+	   lcd_put_cur(2,0); lcd_string_new(" /            / ");
 	   lcd_put_cur(2,0); lcd_int_to_str(steps_count);
-	   lcd_put_cur(2,0); lcd_string_new("/");
-	   lcd_put_cur(2,3); lcd_int_to_str(steps);
+	   lcd_put_cur(2,2); lcd_int_to_str(steps);
 	   lcd_put_cur(2,8); float_to_string(step);
-	   lcd_put_cur(2,16); lcd_int_to_str(shots_count);
-	   lcd_put_cur(2,15); lcd_string_new("/");
-	   lcd_put_cur(2,16); lcd_int_to_str(shots);
+	   lcd_put_cur(2,13); lcd_int_to_str(shots_count);
+	   lcd_put_cur(2,15); lcd_int_to_str(shots);
 
+	   button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+	   HAL_Delay(1);
 
-	    button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-	    read_joystic(); HAL_Delay(2);
-
-	    while (button != 0  )	 /////// pause and exit scan
+	   while(button != 0 && toggle == 0 )	 /////// pause and exit scan
 	{
-
 
 		button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
 		read_joystic(); HAL_Delay(2);
 
-        ///// button press once /////
+		if (steps_count <= steps )
+		 {
+		   for ( shots_count = 0; shots_count < shots; shots_count++ )
+			{
+			    lcd_put_cur(2,13); lcd_int_to_str(shots_count);
+			    button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+			    HAL_Delay(wait);
 
-		if (button == 0)
-		{
+			}
+		  }
 
-			lcd_clear(); lcd_put_cur(1, 5); lcd_string_new("PAUSE");  lcd_put_cur(1,14); lcd_int_to_str(shots);
-			lcd_put_cur(1, 0); lcd_string_new("Press OK To Exit");
-			button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-			HAL_Delay(150);
-			button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-	/////   button press second time      /////
-          if(button == 0) { start_flag = 0; }
-        }
+             read_joystic(); HAL_Delay(2);
+        while( x_value <= 2500 && x_value > 1000 && toggle == 0)
+         {
+        	button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+        	read_joystic(); HAL_Delay(2);
+	       if (x_value <= 900) // Yes
+	          {
+	    	   if(steps_count < steps) { steps_count++; lcd_put_cur(2,0); lcd_int_to_str(steps_count); }
+	    	   current_pos = current_pos + step;
+	    	   HAL_Delay(50);
+	          }
 
-		///// call back to the animation mode
-	}
-	    HAL_Delay(2);
-	    animation_fun();
+	        else if (x_value >= 3000)  // No
+	     	  {
+	    	    if(steps_count > 0){ steps_count--; }
+	    	    lcd_put_cur(2,0); lcd_int_to_str(steps_count);
+	    	    current_pos = current_pos - step;
+	    	    HAL_Delay(50);
+	     	  }
+
+	            if (button == 0) { toggle = 1;}
+
+
+         }
+	                          HAL_Delay(1);
+                              if (button == 0)
+	    	    	 	{
+
+	    	    			lcd_clear(); lcd_put_cur(1, 5); lcd_string_new("PAUSE");  lcd_put_cur(1,14); lcd_int_to_str(shots);
+	    	    			lcd_put_cur(1, 0); lcd_string_new("Press OK To Exit");
+	    	    			button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+	    	    			HAL_Delay(250);
+	    	    			button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+	    	    	/////   button press second time      /////
+	    	    			if(button == 0) { animation_fun(); }
+	    	             }
+
+         //HAL_Delay(150);
+          lcd_put_cur(1,12); lcd_int_to_str(current_pos );
+
+      }
+
+
+
+	    lcd_clear();
+	 //   HAL_Delay(100);
+
+  	}
+	///// call back to the animation mode
+
+  	HAL_Delay(2);
+  	animation_fun();
 
 }
 
