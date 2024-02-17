@@ -197,7 +197,7 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
   	ADC_ChannelConfTypeDef sConfig = {0};
   	sConfig.Channel = channel;
   	sConfig.Rank = 1;
-  	sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
+  	sConfig.SamplingTime = ADC_SAMPLETIME_7CYCLES_5;
 
        if(HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   	 {
@@ -205,9 +205,18 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
   	  }
 
    	 HAL_ADC_Start(&hadc1);
-   	 HAL_ADC_PollForConversion(&hadc1, 100 );  //      4095);
+
+   if (HAL_ADC_PollForConversion(&hadc1, 10 ) !=  HAL_OK)   //      4095);
+
+	   Error_Handler();
+
    	 adc_value = HAL_ADC_GetValue(&hadc1);
+
      return(adc_value);
+
+ ///////////////////////
+
+
 
   }
 
@@ -369,48 +378,62 @@ void free_ride_fun()
 
     button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
     read_joystic(); //HAL_Delay(5);
-
-    lcd_int_to_str(speed_send);
+  //  HAL_Delay(1000);
+  //  lcd_int_to_str(speed_send);
 
     /// ************************
+  //  speed_send = 50;
+
+//    while(button != 0)
+//    {
+//
+//    	    send_buffer[02] = speed_send;
+//    	    while(state_of_rs485 != 1);
+//    	    send_on_rs485(send_buffer);
+//    	    HAL_Delay(1);
+//    	    read_joystic();
+//
+//    }
        while (button != 0 )
        {
+
            button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
            read_joystic(); HAL_Delay(5);
       //     lcd_put_cur(2, 4);  lcd_string_new("      ");
 
-         if ((x_value <= 2050 ) && ( x_value >= 1950))
-         {
+         if ((x_value <= 2099 ) && ( x_value >= 1901))
+           {
         	 HAL_Delay(2);
-        	 speed_send = 000;
+        	 speed_send = 0;
         	 lcd_put_cur(2, 7); lcd_int_to_str(speed_send);
+           }
 
-         }
-         if (x_value >= 2100)
+         if (x_value >= 2100 )
        	      {
+        	   x_value = get_adc_value(ADC_CHANNEL_3);
         	   speed_send = map( x_value,  2100, 0, 0, 100);
         	   lcd_put_cur(2, 7);  lcd_int_to_str(speed_send);
                lcd_put_cur(1, 14);  lcd_string_new("L");
-               HAL_Delay(5);
-               send_buffer[02] = speed_send;
-               while(state_of_rs485 != 1);
-               send_on_rs485(send_buffer);
-               HAL_Delay(1);
-
+             	send_buffer[02] = speed_send;
+               	while(state_of_rs485 != 1);
+               	send_on_rs485(send_buffer);
+               	HAL_Delay(100);
        	      }
 
-       	 if (x_value <= 1900) // 1st limit decrement
+          if (x_value <= 1900) // 1st limit decrement
        		{
-
+             	x_value = get_adc_value(ADC_CHANNEL_3);
        		    speed_send = map( x_value, 1900, 0, 0, 100);
                 lcd_put_cur(2, 7);  lcd_int_to_str(speed_send);
                 lcd_put_cur(1, 14);  lcd_string_new("R");
-                HAL_Delay(5);
-                send_buffer[02] = speed_send;
+               	send_buffer[02] = speed_send;
                 while(state_of_rs485 != 1);
                 send_on_rs485(send_buffer);
-                HAL_Delay(1);
+                HAL_Delay(100);
+
        		}
+
+
 
        }
 
@@ -1206,9 +1229,21 @@ int main(void)
   HAL_Delay(2000); lcd_clear();
 
  // home_scr();
-
+  int speed_send = 45;
   while (1)
   {
+
+     while(1)
+     {
+    	send_buffer[02] = speed_send;
+	    while(state_of_rs485 != 1);
+	    send_on_rs485(send_buffer);
+	    HAL_Delay(100);
+
+
+     }
+
+
 
 	  // ******** joy stic and button readin g***********
 	      home_scr();
@@ -1381,7 +1416,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_4;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_13CYCLES_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_7CYCLES_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -1560,7 +1595,7 @@ void recieve_on_rs485(uint8_t buffer[],size_t buffer_length)
 void send_on_rs485(uint8_t* buffer)
 {
 
-	HAL_GPIO_WritePin(MAX_EN_GPIO_Port, MAX_EN_Pin, 1);
+     	HAL_GPIO_WritePin(MAX_EN_GPIO_Port, MAX_EN_Pin, 1);
 		HAL_GPIO_WritePin(MAX_EN_GPIO_Port, MAX_EN_Pin, 1);
 		message_packet_with_crc(buffer,  POLYNOMIAL,(strlen(buffer)-1) );
 		strcpy( Previous_buffer,buffer);
@@ -1569,6 +1604,7 @@ void send_on_rs485(uint8_t* buffer)
 //		else{buffer[2]=0x2d;}
 		HAL_UART_Transmit(&huart1, buffer,strlen(buffer),100);
 		//HAL_UART_Transmit(&huart1, "driver1\r\n", 9,100);
+	//	HAL_Delay(1);
 		recieve_on_rs485(recieve_buffer,BUFFER_LENGTH);
 
 
