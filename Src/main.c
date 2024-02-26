@@ -86,10 +86,12 @@ float motor_step = 0.0;      // final motor steps after setting limit_1 and limi
 float motor_limit = 0.0;     // differnec of 1st limit and 2nd limt in the man mode
 float motor_count = 0.0;
 uint8_t motor_dir = 0;        // motor direction status 1 = Left /reverse and 2 = RIGHT / Forward
+
 uint8_t motor_speed_pot = 0;
 uint8_t motor_damp_pot = 0;
 uint16_t speed_send = 0;
 char direction;
+
 
 uint8_t man_mode = 0;
 uint8_t unl_mode = 0;
@@ -109,7 +111,9 @@ uint8_t steps = 0;          // total steps of the shots taken in animation mode
 uint8_t shots = 0;          // No of shorts to be taken in animation
 uint8_t  delay_val = 0;     // delay between the each short
 uint8_t  motor_lr =  0;     // motor direction Left or Right
+
 int ac = 0;
+
 crc_t POLYNOMIAL = 0xcb;
 
 /* USER CODE END PV */
@@ -126,7 +130,8 @@ static void MX_USART1_UART_Init(void);
 void home_scr(void);
 void auto_unl(void);
 void read_joystic();
-uint32_t get_adc_value(uint32_t channel);
+//uint32_t get_adc_value(uint32_t channel);
+uint32_t get_adc_value(uint32_t channel, uint8_t rank);
 void read_joystic();
 void float_to_string(float value);
 void back_dis(void);
@@ -162,6 +167,8 @@ crc_t CRC_CHECK_decode(crc_t* message, crc_t polynomial, int nBytes );
 //uint8_t* send_buffer="h---Lcd\r\n";
 //uint8_t send_buffer[10]={0x55,'-','-','-','L','c','d','\r','\n',0x01};
 
+
+
 uint8_t  rx_motor_dir;
 uint32_t rx_motor_step;
 
@@ -173,6 +180,7 @@ uint8_t recieve_buffer[11];
 
 uint8_t RS_485_Data_validate=0;
 int BUFFER_LENGTH=11;
+
 
 uint8_t state_of_rs485 = 1;
 
@@ -206,44 +214,44 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 
 ////  ADC value read function
 
-  uint32_t get_adc_value(uint32_t channel)
-  {
-  	ADC_ChannelConfTypeDef sConfig = {0};
-  	sConfig.Channel = channel;
-  	sConfig.Rank = 1;
-  	sConfig.SamplingTime = ADC_SAMPLETIME_7CYCLES_5;
 
-       if(HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  	 {
-  		 Error_Handler();
-  	  }
-
-   	 HAL_ADC_Start(&hadc1);
-
-   if (HAL_ADC_PollForConversion(&hadc1, 10 ) ==  HAL_OK)   //      4095);
-
-	   adc_value = HAL_ADC_GetValue(&hadc1);
-
-   else
-
-	   Error_Handler();
-
-//   for ( ac = 0; ac < 100; ac++)
-//   {
-//
-//   	 raw_value = HAL_ADC_GetValue(&hadc1);
-//     raw_value = raw_value + raw_value;
-//   }
-//
-//   adc_value = raw_value / 100;
-
-     return(adc_value);
-
- ///////////////////////
+  uint32_t get_adc_value(uint32_t channel, uint8_t rank)
+  	{
+  		ADC_ChannelConfTypeDef sConfig = {0};
+  		uint32_t g_ADCValue = 0;
+  		sConfig.Channel = channel;
+  		sConfig.Rank = rank;
+  		sConfig.SamplingTime = ADC_SAMPLETIME_13CYCLES_5;
 
 
+  		//add to channel select
+  		if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  			{
+  				Error_Handler();
+  			}
+  		HAL_ADC_Start(&hadc1);
 
-  }
+  		if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK)
+  		 {
+  			g_ADCValue = HAL_ADC_GetValue(&hadc1);
+  		 }
+  		else
+  			{
+  				Error_Handler();
+  			}
+
+  	//  remove from channel select
+
+  	//  sConfig.Rank = 0 ;
+
+  	//	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  	//	Error_Handler();
+
+  			HAL_ADC_Stop(&hadc1);
+  			return (g_ADCValue);
+
+  	}
+
 
 
 
@@ -251,20 +259,20 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 
   void read_joystic()
   {
-	y_value = get_adc_value(ADC_CHANNEL_4);
+	y_value = get_adc_value(ADC_CHANNEL_4,1);
 	HAL_Delay(1);
-    x_value = get_adc_value(ADC_CHANNEL_3);
+    x_value = get_adc_value(ADC_CHANNEL_3,1);
     HAL_Delay(1);
 
   }
   void read_speed()
    {
- 	spd_value = get_adc_value(ADC_CHANNEL_1);
+ 	spd_value = get_adc_value(ADC_CHANNEL_1,1);
      HAL_Delay(1);
    }
   void read_damping()
   {
- 	damp_value = get_adc_value(ADC_CHANNEL_2);
+ 	damp_value = get_adc_value(ADC_CHANNEL_2,1);
      HAL_Delay(1);
    }
 
@@ -403,6 +411,7 @@ void back_dis()
 
 void free_ride_fun()
 {
+
     fr_flag = 0;
     lcd_clear();
 	lcd_put_cur(1, 0); lcd_string_new("FreeRide  ");
@@ -412,6 +421,9 @@ void free_ride_fun()
 	HAL_Delay(1000); // debounce dealy
 	button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
     read_joystic(); //HAL_Delay(5);
+  //  HAL_Delay(1000);
+  //  lcd_int_to_str(speed_send);
+
 
 
  /// *************** when limits are set in Man mode  *************
@@ -525,6 +537,7 @@ void free_ride_fun()
 	        }
 
       }
+
 
 ///  back to the live function  /////////
 
@@ -985,9 +998,9 @@ void start_fun(void)
   	}
 	///// call back to the animation mode
 
+
   	HAL_Delay(2);
   	animation_fun();
-
 }
 
 
@@ -1333,8 +1346,17 @@ int main(void)
   HAL_Delay(2000); lcd_clear();
 
 
+
+
   while (1)
   {
+//       	send_buffer[02] = speed_send;
+//	    while(state_of_rs485 != 1);
+//	    send_on_rs485(send_buffer);
+//	    HAL_Delay(100);
+
+
+
 
 //	  while(1)
 //	  {
@@ -1347,6 +1369,7 @@ int main(void)
 //	  }
 
 	 // ******** joy stic and button readin g***********
+
 
 	      home_scr();
 	      button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
@@ -1498,9 +1521,10 @@ static void MX_ADC1_Init(void)
 
   /** Configure Regular Channel
   */
+
   sConfig.Channel = ADC_CHANNEL_4;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_7CYCLES_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_13CYCLES_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
