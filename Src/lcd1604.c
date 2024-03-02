@@ -36,9 +36,8 @@
 
 
 
+
 /****************** define the timer handler below  **************/
-
-
 
 void delay (int us)
 {
@@ -46,6 +45,17 @@ void delay (int us)
 	HAL_Delay(1);
 
 }
+
+
+void delayMicroseconds(uint32_t microseconds)
+
+{
+  for (uint32_t kk =  0; kk < microseconds;  kk++)
+  {
+    // do nothing
+  }
+}
+
 
 /*******************************************************************/
 
@@ -67,9 +77,11 @@ void send_to_lcd ( char data, int rs)
 	 * if the LCD still doesn't work, increase the delay to 50, 80 or 100..
 	 */
 	HAL_GPIO_WritePin(EN_GPIO_Port, EN_Pin, 1);
-	delay(1);  //    //delay (20);
+	delayMicroseconds(3600); // delay(1);  //    //delay (20);
+
 	HAL_GPIO_WritePin(EN_GPIO_Port, EN_Pin, 0);
-	delay(1);     //delay (20);
+	delayMicroseconds(3600); //delay(1);     //delay (20);
+
 }
 
 void lcd_send_cmd( char cmd)
@@ -103,7 +115,8 @@ void lcd_send_data( char data)
 void lcd_clear(void)
 {
 	lcd_send_cmd(0x01);
-	HAL_Delay(2);
+
+//	HAL_Delay(1);
 }
 
 void lcd_put_cur(int row, int col)
@@ -133,7 +146,7 @@ void lcd_put_cur(int row, int col)
 void lcd_init(void)
 {
 	lcd_send_cmd (0x02);
-	HAL_Delay(1);
+	//HAL_Delay(1);
 	lcd_send_cmd (0x28);HAL_Delay(1);
 	lcd_send_cmd (0x0c);HAL_Delay(1);
 	lcd_send_cmd (0x06);HAL_Delay(1);
