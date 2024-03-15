@@ -58,6 +58,8 @@ ADC_HandleTypeDef hadc1;
 
 SPI_HandleTypeDef hspi1;
 
+TIM_HandleTypeDef htim2;
+
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
@@ -70,8 +72,17 @@ UART_HandleTypeDef huart1;
 //#define x_channel ADC_Select_4
 //#define y_channel ADC_Select_5
 
+uint8_t eeprom_mu_mode = 0;            // eeprom variable
+long double eeprom_step = 0.0;    // eeprom variable
+
+char working_mode  = 'G';     // define the current working mode (G ,L, P, V, R, so on )
+char man_unl_mode =   'U';    // define the MAN and UNL mode of the device
+char  limit_status =   '+';    // define the status of the limit mean limt is possitive or negative
+uint8_t back_light = 100;     // back light of the led
+
 uint8_t j_toggle1 = 0;
 uint8_t j_toggle = 0;
+uint8_t prev_row_pos = 0;    // hold the status of the previous row position
 uint32_t adc_value = 0;
 uint32_t raw_value = 0;
 uint8_t button = 1;          // joy stic button status
@@ -97,16 +108,26 @@ long double fixed_limit = 0.0;     // motor limits after limits setting
 int64_t limit_1 = 0;   	     // motor limit_1 value
 int64_t limit_2 = 0;
 int64_t motor_limit = 0;
+int64_t motor_move_step = 0;  // In animation mode motor step move L or R in
 
 
 uint8_t motor_dir = 0;        // motor direction status 1 = Left /reverse and 2 = RIGHT / Forward
 uint8_t motor_speed_pot = 0;  // speed port value after mapped 0 to 100
 uint8_t motor_damp_pot = 0;  //  damping port value after mapped 0 to 100
+uint8_t motor_damp_dis = 0;
 uint16_t speed_send = 0;     // speed value send to the slave device
 char direction;              // direction of the motor Left or Right
-
+char motor_move = 'R';              // motor move L / R in the animation mode
+char send_step_status;       // status M / S of the send step function motor will move or stop
 long double current_motor_step = 0.0; // hold the current motor step position in every function.
 
+uint16_t current_spd = 0;   // hold the current speed of the motor
+uint16_t target_spd = 0;    // hold the target speed of the motor
+uint16_t deaccel_rate = 0;  // hold the de-acceleration rate of the motor
+float  pree_step = 0.0;       // hold the value of pree step to stop the motor
+float  step_error = 0.0;
+float  max_point = 0.0;      // upper limit of the motor in limit mode
+float  min_point = 0.0;      // lower limit of the motor in limit mode
 
 uint8_t man_mode = 0;       //
 uint8_t unl_mode = 0;
@@ -119,24 +140,35 @@ uint8_t exit_flag = 0;
 uint8_t exit1_flag = 0;
 uint8_t start_flag;
 uint8_t animation_flag = 0;
+uint8_t timelapse_flag = 0;
 uint8_t cursor_pos = 0;
-
+double dmp_data1 = 0.0;     // used in the damping display function
 unsigned int  home_pos = 0;  // home position in animation mode
 float  old_home_pos = 0.0;   // old position in animation mode
-float new_home_pos = 0.0;    // new position in animation mode
+unsigned int new_home_pos = 0;    // new position in animation mode
 float current_pos = 0.0;     // current position in animation mode
-float step = 0.0;            // motor will move step to left or right in animation mode
-uint8_t steps = 0;          // total steps of the shots taken in animation mode
+
+float step = 0.1;            // motor will move step to left or right in animation mode
+char step_inc_dec;            // motor step increment or decrement in animation mode.
+uint16_t steps = 0;          // total steps of the shots taken in animation mode
+uint16_t steps_limit = 0;
 uint8_t shots = 0;          // No of shorts to be taken in animation
 uint8_t  delay_val = 0;     // delay between the each short
 uint8_t  motor_lr =  0;     // motor direction Left or Right
-
 uint8_t steps_count = 0;    //  steps counter in the animation start function
 uint8_t shots_count = 0;    // shots counter in animation start function
 uint32_t wait_sec = 0;           // wati between on shot in animation start function
 
+uint8_t interval_val = 0;   //  interval value in the timelapse funcion
+float expos_val = 0.0;      // expos value in the timelapse function
+char  time_mode;            // mode (continute of SDS) in timelapse funciton
+//uint16_t time_shots = 0;    // No of shots to be taken in the timelapse mode
+//uint16
+
+
 uint8_t ac = 0;
-uint32_t adc_sum = 0;
+uint32_t adc_sum = 0;      // the get the average value of  the adc value
+
 char string[20];
 char string1[64];
 
@@ -150,6 +182,7 @@ static void MX_GPIO_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_USART1_UART_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 
 
@@ -176,10 +209,16 @@ void disp_dmp_val( uint8_t dmp_data);
 char *Convert_int_to_String(int integer);
 void disp_send_spd_val( uint16_t ss_data);
 char *Convert_float_to_String(double value1);
-void send_motor_limit();
-void motor_stop(void);
-
-
+void send_motor_limit(void);
+void pree_step_cal(void);
+void motor_soft_stop(void);
+void ani_screen1(void);
+void ani_screen2(void);
+void arrow_up();
+void arrow_down();
+void time_screen1();
+void time_screen2();
+void time_screen3();
 
 
 ////////// 485 //////////
@@ -208,14 +247,14 @@ crc_t CRC_CHECK_decode(crc_t* message, crc_t polynomial, int nBytes );
 uint8_t  rx_motor_dir;
 int64_t rx_motor_step = 0;
 
-uint8_t send_buffer[20] = {0x55,'F',0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x01,0x55};
+uint8_t send_buffer[30] = {0x55,'S',0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, 0x01,0x55};
 
-uint8_t Previous_buffer[20];
-uint8_t RECIEVE_VALID_DATA[20];
-uint8_t recieve_buffer[20];
+uint8_t Previous_buffer[30];
+uint8_t RECIEVE_VALID_DATA[30];
+uint8_t recieve_buffer[30];
 
 uint8_t RS_485_Data_validate=0;
-int BUFFER_LENGTH=20;
+int BUFFER_LENGTH=30;
 
 uint8_t state_of_rs485 = 1;
 
@@ -235,16 +274,16 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 	}
 
 //motor_damp_pot = map( damp_value,  0, 4095, 0, 100);
-
-  void home_scr(void)
-  {
-	  lcd_put_cur(1, 1);
-	  lcd_string_new("RE-CALIBRATE?");
-	  lcd_put_cur(2, 2);
-	  lcd_string_new("<NO>");
-	  lcd_put_cur(2, 9);
-	  lcd_string_new(" YES ");
-  }
+//
+//  void home_scr(void)
+//  {
+//	  lcd_put_cur(1, 1);
+//	  lcd_string_new("RE-CALIBRATE?");
+//	  lcd_put_cur(2, 2);
+//	  lcd_string_new("<NO>");
+//	  lcd_put_cur(2, 9);
+//	  lcd_string_new(" YES ");
+//  }
 
 ////  ADC value read function
 
@@ -282,12 +321,12 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 
   void read_joystic()
   {
-	y_value = get_adc_value(ADC_CHANNEL_4);
+	y_value = get_adc_value(ADC_CHANNEL_4); ;                //(ADC_CHANNEL_4);
 	//HAL_Delay(1);
-    x_value = get_adc_value(ADC_CHANNEL_3);
+    x_value = get_adc_value(ADC_CHANNEL_3);                 //(ADC_CHANNEL_3);
    // HAL_Delay(1);
 
-  }
+   }
 
 //  void read_speed()
 //   {
@@ -333,13 +372,6 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 
  void rx_data()
  {
-	 //   rx_motor_step = 0;
-//		          // exact direction of the motor
-//		rx_motor_step   |=     RECIEVE_VALID_DATA[2] << 24;
-//		rx_motor_step   |=     RECIEVE_VALID_DATA[3] << 16;
-//		rx_motor_step   |=     RECIEVE_VALID_DATA[4] << 8;
-//		rx_motor_step   |=     RECIEVE_VALID_DATA[5];
-
 	    rx_motor_dir    =      RECIEVE_VALID_DATA[1];
 
 		rx_motor_step =  RECIEVE_VALID_DATA[2] << 56;
@@ -355,11 +387,11 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 		motor_step = rx_motor_step / 10.0;  // + ((rx_motor_step % 10) / 10.0);     //2560;       // convert the motor micro steps into float numbers
  }
 
-
+ // send the Set limit to the slave device
  void send_motor_limit()
  {
-	 direction = 'L';
-	 send_buffer[7] =  direction;  // 'L';  // motor limit set
+	 //direction = 'L';
+	 send_buffer[7] =  working_mode;  // 'L';  // motor limit set
 	 send_buffer[8] =  (motor_limit >> 56) & 0xFF;
 	 send_buffer[9] =  (motor_limit >> 48) & 0xFF;
 	 send_buffer[10] =  (motor_limit >> 40) & 0xFF;
@@ -368,6 +400,8 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 	 send_buffer[13] = (motor_limit >> 16) & 0xFF;
 	 send_buffer[14] = (motor_limit >> 8)  & 0xFF;
 	 send_buffer[15] =  motor_limit & 0xFF;
+	 send_buffer[16] =  limit_status;
+
 
 	 while(state_of_rs485 != 1);
 	 send_on_rs485(send_buffer);
@@ -375,23 +409,103 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 
  }
 
-// motor stop function for every mode
+// Send the motor_step_move to slave device for L or R in animation mode
+ void send_step()
 
- void motor_stop()
  {
-//	 speed_send = 15;
-//	 direction = 'S';
-//	 data_transmit();
+//	 uint32_t step_uint = *(uint32_t *)&step;
+//
+//	 send_buffer[17] = (step_uint >> 24) & 0xFF;
+//	 send_buffer[18] = (step_uint >> 16) & 0xFF;
+//	 send_buffer[19] = (step_uint >>  8) & 0xFF;
+//	 send_buffer[20] =  step_uint & 0xFF;
+	 send_buffer[1]  =  direction;
+	 send_buffer[17] =  (motor_move_step >> 56) & 0xFF;
+	 send_buffer[18] =  (motor_move_step >> 48) & 0xFF;
+	 send_buffer[19] =  (motor_move_step >> 40) & 0xFF;
+	 send_buffer[20] = (motor_move_step >> 32) & 0xFF;
+	 send_buffer[21] = (motor_move_step>> 24) & 0xFF;
+	 send_buffer[22] = (motor_move_step >> 16) & 0xFF;
+	 send_buffer[23] = (motor_move_step >> 8)  & 0xFF;
+	 send_buffer[24] =  motor_move_step & 0xFF;
+	 send_buffer[25] =  send_step_status;
+
+	// send_buffer[25] =  limit_status;
+
+	 while(state_of_rs485 != 1);
+	 send_on_rs485(send_buffer);
+
+	// rx_data();  // read the new steps;
+
+ }
+
+   // calculate the Pree steps to stop the motor
+
+ void pree_step_cal()
+ {
+	current_spd  = RECIEVE_VALID_DATA[16] << 8;
+	current_spd |= RECIEVE_VALID_DATA[17];
+	deaccel_rate  = RECIEVE_VALID_DATA[18] << 8;
+	deaccel_rate |= RECIEVE_VALID_DATA[19];
+//	s= ( ( (y*y) ) / (2*z) )/2;
+   target_spd = 0;
+//   pree_step =  ( ((current_spd * current_spd)) - (target_spd * target_spd) / ( 2 * deaccel_rate)) / 20;
+
+	pree_step = 	(current_spd * current_spd);
+	pree_step =     pree_step  / (2 * deaccel_rate);
+	pree_step =     pree_step / 20;
+	step_error = pree_step * 10 / 100;
+	pree_step = pree_step + step_error;
+	max_point = fixed_limit - pree_step;
+	min_point = (0.0 + pree_step );
+
+ ////   lcd_put_cur(3, 10);  float_to_string(pree_step); show pree step on the lcd
 
  }
 
 
+ //********* transmit the data over RS484 module **************
+
+ void data_transmit()
+ {
+ 	 send_buffer[1] = direction;
+ 	 send_buffer[2] = motor_speed_pot;
+ 	 send_buffer[3] = motor_damp_pot;
+  	 send_buffer[4] = speed_send>>8;
+ 	 send_buffer[5] = speed_send & 0x00FF;
+ 	 send_buffer[6] = man_unl_mode;
+ 	 send_buffer[7] = working_mode; // 'L';  // motor limit set
+  // limit data
+	// send_buffer[7] =  working_mode;
+	 send_buffer[8] =  (motor_limit >> 56) & 0xFF;
+	 send_buffer[9] =  (motor_limit >> 48) & 0xFF;
+	 send_buffer[10] =  (motor_limit >> 40) & 0xFF;
+	 send_buffer[11] = (motor_limit >> 32) & 0xFF;
+	 send_buffer[12] = (motor_limit >> 24) & 0xFF;
+	 send_buffer[13] = (motor_limit >> 16) & 0xFF;
+	 send_buffer[14] = (motor_limit >> 8)  & 0xFF;
+	 send_buffer[15] =  motor_limit & 0xFF;
+	 send_buffer[16] =  limit_status;
+ 	 // send steps data
+	 send_buffer[17] =  (motor_move_step >> 56) & 0xFF;
+	 send_buffer[18] =  (motor_move_step >> 48) & 0xFF;
+	 send_buffer[19] =  (motor_move_step >> 40) & 0xFF;
+	 send_buffer[20] = (motor_move_step >> 32) & 0xFF;
+	 send_buffer[21] = (motor_move_step>> 24) & 0xFF;
+	 send_buffer[22] = (motor_move_step >> 16) & 0xFF;
+	 send_buffer[23] = (motor_move_step >> 8)  & 0xFF;
+	 send_buffer[24] =  motor_move_step & 0xFF;
+	 send_buffer[25] =  send_step_status;
+
+ 	 while(state_of_rs485 != 1);
+ 	 send_on_rs485(send_buffer);
+ 	// HAL_Delay(1);
+ }
 
 
+   // Display the Speed port value   //
 
-   // Speed port value display  //
-
-  void disp_spd_val( uint8_t port_data)  // display the speed pot value of the motor
+  void disp_spd_val( uint8_t port_data)
  {
    uint8_t length = strlen(Convert_int_to_String(port_data));
    if (length == 1) {
@@ -420,28 +534,30 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 
  void disp_dmp_val( uint8_t dmp_data)
  {
-   uint8_t length1 = strlen(Convert_int_to_String(dmp_data));
-   if (length1 == 1)
+
+  dmp_data1 =  dmp_data  / 10.0 ;
+   uint8_t length1 = strlen(Convert_float_to_String(dmp_data1));
+//   if (length1 == 1)
+//   {
+//     lcd_put_cur(2, 13);
+//     lcd_string_new("  ");
+//     lcd_put_cur(2, 15);
+//     //lcd_int_to_str(dmp_data);
+//     lcd_string_new(Convert_float_to_String(dmp_data));
+//   }
+    if (length1 == 3)
    {
-     lcd_put_cur(2, 13);
-     lcd_string_new("  ");
-     lcd_put_cur(2, 15);
-     //lcd_int_to_str(dmp_data);
-     lcd_string_new(Convert_int_to_String(dmp_data));
-   }
-   else if (length1 == 2)
-   {
-     lcd_put_cur(2, 13);
+     lcd_put_cur(2, 12);
      lcd_string_new(" ");
-     lcd_put_cur(2, 14);
-  //   lcd_int_to_str(dmp_data);
-     lcd_string_new(Convert_int_to_String(dmp_data));
-   }
-   else if (length1 == 3)
-   {
      lcd_put_cur(2, 13);
+  //   lcd_int_to_str(dmp_data);
+     lcd_string_new(Convert_float_to_String(dmp_data1));
+   }
+   else if (length1 == 4)
+   {
+     lcd_put_cur(2, 12);
     // lcd_int_to_str(dmp_data);
-     lcd_string_new(Convert_int_to_String(dmp_data));
+     lcd_string_new(Convert_float_to_String(dmp_data1));
    }
 
  }
@@ -481,7 +597,7 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 
   }
 
-  //  display the No. of motor steps receive from slave device //
+  //  display the No. of motor steps motor move  //
 
  void disp_motor_step(long double ms_data)   // display the speed send value to slave device
 {
@@ -521,14 +637,128 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
   }
 
 
+ void data_display()
+ {
+ 	// lcd_put_cur(0, 10);   lcd_int_to_str(spd_value);
+         //lcd_put_cur(0, 1);   lcd_int_to_str(rx_motor_step); display motor step in interger format on lcd
+   //	 lcd_put_cur(1, 8);   float_to_string(motor_count);    // motor steps display on lcd
+   	 disp_motor_step(motor_count);
 
- //************ free Ride, recording playback  video back function and their subfunctions
+   	 // lcd_put_cur(2, 0);   lcd_int_to_str(motor_speed_pot);
+   // lcd_put_cur(2, 14);  lcd_int_to_str(motor_damp_pot);
+ 	 disp_spd_val(motor_speed_pot);
+ 	 disp_dmp_val(motor_damp_dis);
+   // lcd_put_cur(2,  5);  lcd_string_new("       ");
+   // lcd_put_cur(2, 7);   lcd_int_to_str(speed_send);
+ 	 disp_send_spd_val(speed_send);
+ 	 lcd_put_cur(0, 15);  lcd_send_data(direction);
+ 	// HAL_Delay(1);
+ }
+
+
+  void get_dam_pot_value()
+ {
+    adc_sum = 0;
+    for (ac = 0; ac < 50; ac++)
+    {
+ 	damp_value = get_adc_value(ADC_CHANNEL_1);             //(ADC_CHANNEL_2);
+     adc_sum = adc_sum + damp_value;
+    }
+     damp_value = 0;
+     damp_value = adc_sum / 50;
+
+     if (damp_value > 4000) { damp_value = 4000;}
+
+    motor_damp_pot = map( damp_value,  0, 4000, 145, 10);
+    motor_damp_dis = map( damp_value,  0, 4000, 1, 100);
+
+ //	motor_damp_pot = map( damp_value,  0, 4000, 0, 100);
+
+ //	motor_damp_pot1 = (damp_value - 1) * (100 - 1) /  ( 4020 - 1) + 1;
+
+ }
+
+
+ void get_spd_pot_value()
+ {
+       adc_sum = 0;
+ 	  for (ac = 0; ac < 50; ac++)
+ 	   {
+ 		spd_value = get_adc_value(ADC_CHANNEL_2);               //(ADC_CHANNEL_1);
+ 	    adc_sum += spd_value;
+ 	   }
+       spd_value = 0;
+ 	  spd_value = adc_sum / 50;
+ 	  if (spd_value > 4000) { spd_value = 4000;}
+       motor_speed_pot = map( spd_value,  0, 4000, 1, 100);
+
+ 	//	motor_speed_pot = (spd_value - 1) * (100 - 1) /  ( 4020 - 1) + 1;
+
+ }
+
+
+    // Display the arrow on the LCD screen
+
+ void arrow_down()
+ {
+	 j_toggle1 = 0;
+     lcd_put_cur(row_pos,0); lcd_string_new(" ");
+     row_pos++; if (row_pos >= 4) { row_pos = 0; }
+     lcd_put_cur(row_pos,0); lcd_string_new(">");
+
+ }
+
+ void arrow_up()
+ {
+	 j_toggle1 = 0;
+     lcd_put_cur(row_pos,0); lcd_string_new(" ");
+     row_pos--;  if(row_pos == 255) { row_pos = 3; }
+     lcd_put_cur(row_pos,0); lcd_string_new(">");
+
+ }
+
+
+void get_row_pos()
+{
+ read_joystic();
+if ((y_value >= 3000 ) && (y_value <= 4095) && ( j_toggle1 == 1) )
+{
+
+	 // j_toggle1 = 0;
+	  arrow_down();
+//			  lcd_put_cur(row_pos,0); lcd_string_new(" ");  if ( row_pos < 3) { row_pos++; }
+//			  lcd_put_cur(row_pos,0); lcd_string_new(">");
+	  cursor_pos++;
+}
+
+else if ((y_value <= 900) && (y_value >= 0 ) && ( j_toggle1 == 1))
+	 {
+	  // j_toggle1 = 0;
+	   arrow_up();
+//			   lcd_put_cur(row_pos,0); lcd_string_new(" ");
+//			   row_pos--; if(row_pos >= 255) { row_pos = 4; }
+//			   lcd_put_cur(row_pos,0);lcd_string_new(">"); //HAL_Delay(100);
+	   cursor_pos--;  //if (cursor_pos < 1) { cursor_pos = 8;}
+	 }
+
+else if ((y_value <= 2400) && (y_value > 1300))
+	{
+		  j_toggle1 = 1;  //HAL_Delay(2);
+
+}
+}
+
+
+ /////////////////////////////////////////////////////////////////////////////
+
+
+ //************ RECORDING FUNCTION  **************//
 
 
   void  Recording_fun()
   {
 	lcd_clear();
-	HAL_Delay(1500);
+	HAL_Delay(500);
 	button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
 	read_joystic(); HAL_Delay(5);
 
@@ -543,10 +773,12 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 
   }
 
+  	  //************ PLAYBACK FUNCTION  **************//
 
  void Playback_fun()
-  { lcd_clear();
-	HAL_Delay(1500);
+  {
+	 lcd_clear();
+	HAL_Delay(500);
 	button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
 	read_joystic(); HAL_Delay(5);
 
@@ -561,69 +793,94 @@ long map(long x, long in_min, long in_max, long out_min, long out_max)
 }
 
 
-  //******************** VideoLoop Funcion *******************//
+ 	 	 //************ VIDEOLOOP FUNCTION  **************//
 
  void Videoloop_fun()
   {
-	lcd_clear();
-//   button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-//	 read_joystic(); HAL_Delay(5);
 
-	if (man_flag == 0)
+	working_mode  = 'V';
+	direction = 'S';
+	data_transmit();
+	lcd_clear();
+
+//	data_transmit();
+
+	if (man_flag == 0)    //  limit are not set in the man mode
 	{
 		lcd_put_cur(1, 0); lcd_string_new("In Man Mode Only");
 		HAL_Delay(500);  // button de-bounce dealy
 		button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-		while(button !=0 )
-		{
-		 button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
 
-		 HAL_Delay(1);
-		} lcd_clear();
+    	while(button !=0 )
+    	{
+		 button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+//		 speed_send = 15;
+//		 direction = 'S';
+//		 data_transmit();
+		}
+
 	}
+
+	    // if limits are set in the man mode
 
 	else if (man_flag == 1)
 	{
 		lcd_put_cur(1, 0);   lcd_string_new("VideoLoop");
 		lcd_put_cur(1, 15);  lcd_send_data(direction);           //float_to_string(motor_limit);
-		motor_count = motor_limit;
+	    //motor_count = motor_limit;
 		HAL_Delay(500);  // button de-bounce   delay
-	//	get_pot_value();
 		button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-		while(button !=0 )
-	 {
-		 button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-		 get_spd_pot_value();
-		 get_dam_pot_value();
-	//	 lcd_put_cur(0, 1);   lcd_int_to_str(rx_motor_step);
-		 lcd_put_cur(1, 8);   float_to_string(motor_count);    // motor steps display on lcd
-		 lcd_put_cur(2, 0);   lcd_int_to_str(motor_speed_pot);
-		 lcd_put_cur(2, 14);  lcd_int_to_str(motor_damp_pot);
-	//	 lcd_put_cur(2, 7);   lcd_int_to_str(speed_send);
+
+    	while(button != 0 )
+	     {
+			 button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+			 get_dam_pot_value();
+			 get_spd_pot_value();
+			 speed_send = motor_speed_pot * 15.50;
+			 data_transmit();
+			 rx_data();
+			 pree_step_cal();
+			 motor_count = motor_step;
+			 data_display();
+		 }
 
 
-		 HAL_Delay(1);
-	 }
-		lcd_clear();
-	}
+   	 }
 
-  //live_fun(); /// call again to the live function
+//	        working_mode = 'G'; // go back to the live mode
+//	        speed_send = 15;
+//    		direction = 'S';
+//    		data_transmit();
+//    		rx_data();
+//    		pree_step_cal();
+//    		motor_count = motor_step;
+//    		data_display();
+
+
+	current_motor_step = motor_step;    // motor current position
+//    lcd_clear();
+    prev_row_pos = 3;
+    live_fun(); /// call again to the live function
 
  }
 
 
-
+     //************ FREE-RIDE FUNCTION  **************//
 
 
 void free_ride_fun()
 {
-    fr_flag = 0;
+    working_mode = 'F';
+    direction = 'S';
+    data_transmit();
+	fr_flag = 0;
+    uint8_t stop = 1;
   //  HAL_Delay(150);   // debounce dealy
     lcd_clear();
 //    get_dam_pot_value();
 //    get_spd_pot_value();
-	lcd_put_cur(1, 0); lcd_string_new("FreeRide  ");
-//	motor_count = motor_step;
+
+	motor_count = motor_step;
 //	motor_count = current_motor_step;  // motor current position store
 //	data_display();
 	//data_transmit();
@@ -639,81 +896,108 @@ void free_ride_fun()
 //	 send_motor_limit();
 //	 rx_data();
 	 HAL_Delay(250);
-//	 send_buffer[7] = 0x00;  // remove the 'L' from the buffer
 	 // motor_count = motor_limit;
-	 lcd_put_cur(0, 10);  float_to_string(motor_limit);
+	 lcd_put_cur(1, 0); lcd_string_new("FreeRide  ");
+//      	 lcd_put_cur(0, 10);  float_to_string(motor_limit);  // show to limit on list line
 	// motor_count = motor_step;
 	 motor_count = current_motor_step;
 	 data_display();
      button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
 
+/////////////////////////////////////////////////////
+
 	 while (button != 0 )
 	{
 		     button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-			 read_joystic();  //HAL_Delay(1);
+		     data_transmit();
+		     read_joystic();  //HAL_Delay(1);
 			 get_dam_pot_value();
 			 get_spd_pot_value();
-			 data_transmit();
+			// data_transmit();
 			 rx_data();
+			 pree_step_cal();
 			 motor_count = motor_step;
 			 data_display();
-
+			// speed_send = map( x_value,  2100, 4000, 15, 1550) * motor_speed_pot / 100;
 
 	 	    if ((x_value <= 2098 ) && ( x_value >= 1902))
 	 	           {
 	 	        	 speed_send = 15;
 	 	        	 direction = 'S';
-	  	           }
-            // increment
-	 	    else if ((x_value <= 900) && ( x_value >= 0 ))  //// 1st limit increment
+	 	        	 stop = 1;
+	 	           }
+
+	 	    else if ((x_value <= 1900) && ( x_value >= 0 ))  //// 1st limit increment
 	 	      {
-	 	        	if (motor_step < fixed_limit)
-	 	       	{
-	 	      		speed_send = map( x_value,  1900, 0, 15, 1550) * motor_speed_pot / 100;
-	 	       		direction = 'F';
-	 	       	}
+	 	    	speed_send = map(x_value,  1800, 0, 15, 1550) * motor_speed_pot / 100;
+	 	       //	if ( (motor_step < max_point) && (motor_step != fixed_limit)  )    // ((fixed_limit - pree_step)))
+	 	      // 	{
+	       		   direction = 'F';
+	 	   //    	}
 
-				else  {
-				       speed_send = 15;
-				       direction = 'S';
-		   	          } // motor_stop();  }
-	 	         }
+	 	     //  else if  (motor_step > max_point ) // &&  stop == 1 )  //       //(fixed_limit - pree_step ))  //   - (fixed_limit* 10 /100)))
+	 	     //  {
+				// while( motor_step != fixed_limit )  //( motor_step != fixed_limit && stop == 1)
+				//	 {
+					//  speed_send = 15;
+					//  direction = 'S';
+//					  data_transmit();
+//					  rx_data();
+//				      pree_step_cal();
+//					  motor_count = motor_step;
+//					  data_display();
+				 //    }
+			  // }
+			}
 
-             // decrement
+          // decrement
+
 	 	     else if ((x_value >= 2100) && (x_value < 4095)) // 1st limit decrement
 	 	      {
+	 	    	speed_send = map( x_value,  2100, 4000, 15, 1550) * motor_speed_pot / 100;
 
-	 	      	if ( motor_step > 0.1 )   //&& motor_count < fixed_limit )  //&& motor_count < motor_limit)
-	 	          {
-	 	      		speed_send = map( x_value,  2100, 4000, 15, 1550) * motor_speed_pot / 100;
-	 	      	    direction = 'R';
-    	          }
+	 	    //	if ( motor_step > min_point )   //0 + pree_step)    //&& motor_count < fixed_limit )  //&& motor_count < motor_limit)
+	 	             direction = 'B';
 
-	 	      else	{
-	 	    	     speed_send = 15;
-	 		   	     direction = 'S';
-	 	            } // motor_stop();  }
-	 	        }
+	 	    //	 else if ( motor_step < min_point )  // (0 + pree_step ))  // + (fixed_limit* 10 /100)))
+			 //      {
+				//	 while ( motor_step != 0.0 ) //( motor_step != 0.0 && stop == 1)
+					//     {
+						//  speed_send = 15;
+						//  direction = 'S';
+//						  data_transmit();
+//						  rx_data();
+//						  pree_step_cal();
+//						  motor_count = motor_step;
+//						  data_display();
+			          //  }
 
-	 		}
+			    //   } // motor_stop();  }
+	 	      }
+
 	    current_motor_step = motor_step;  // current position of the motor
 	}
 
+	lcd_clear();
 
+  }
 
  // **********  when limits are unlimited       ***********************
 
   else if (man_flag == 0)
 
   {
+
 	  speed_send = 15;
 	  direction = 'S';
 	  motor_count = current_motor_step;
-	  data_display();
+	//  data_display();
 	  HAL_Delay(250);
+	  lcd_put_cur(1, 0); lcd_string_new("FreeRide  ");
     // motor_count = current_motor_step;     // motor_step;
 	  button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
 	//  read_joystic(); HAL_Delay(5);
+
 	  while (button != 0 )
 	      {
 	             button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
@@ -741,7 +1025,7 @@ void free_ride_fun()
 
 	     else if ((x_value >= 2100) && (x_value < 4095)) // 1st limit decrement
 	      		{
-	    	    direction = 'R';
+	    	    direction = 'B';
 	   	      	speed_send = map( x_value,  2100, 4000, 15, 1550) * motor_speed_pot / 100;
 	       		HAL_Delay(1);
 	      		}
@@ -763,187 +1047,168 @@ void free_ride_fun()
 
 
 
-void data_display()
-{
-	// lcd_put_cur(0, 10);   lcd_int_to_str(spd_value);
-	 lcd_put_cur(0, 1);   lcd_int_to_str(rx_motor_step);
-  //	 lcd_put_cur(1, 8);   float_to_string(motor_count);    // motor steps display on lcd
-  	 disp_motor_step(motor_count);
-
-  	 // lcd_put_cur(2, 0);   lcd_int_to_str(motor_speed_pot);
-  // lcd_put_cur(2, 14);  lcd_int_to_str(motor_damp_pot);
-	 disp_spd_val(motor_speed_pot);
-	 disp_dmp_val(motor_damp_pot);
-  // lcd_put_cur(2,  5);  lcd_string_new("       ");
-  // lcd_put_cur(2, 7);   lcd_int_to_str(speed_send);
-	 disp_send_spd_val(speed_send);
-	 lcd_put_cur(0, 15);  lcd_send_data(direction);
-	// HAL_Delay(1);
-}
-
-//********* transmit the data over RS484 module **************
-
-void data_transmit()
-{
-	 send_buffer[1] = direction;
-	 send_buffer[2] = motor_speed_pot;
-	 send_buffer[3] = motor_damp_pot;
- 	 send_buffer[4] = speed_send>>8;
-	 send_buffer[5] = speed_send & 0x00FF;
-//	 send_buffer[6] = 'M';  // motor limit set
-//	 send_buffer[7] =  u steps to run;
-
-	 while(state_of_rs485 != 1);
-	 send_on_rs485(send_buffer);
-	// HAL_Delay(1);
-}
-
-
-  //********** function to get speed and damp pot value and then  mapped it  **********
-
-void get_dam_pot_value()
-{
-   adc_sum = 0;
-   for (ac = 0; ac < 50; ac++)
-   {
-	damp_value = get_adc_value(ADC_CHANNEL_2);
-    adc_sum = adc_sum + damp_value;
-   }
-    damp_value = 0;
-    damp_value = adc_sum / 50;
-	motor_damp_pot = map( damp_value,  0, 4095, 0, 100);
-//	motor_damp_pot = (damp_value - 1) * (100 - 1) /  ( 4020 - 1) + 1;
-
-}
-
-
-void get_spd_pot_value()
-{
-      adc_sum = 0;
-	  for (ac = 0; ac < 50; ac++)
-	   {
-		spd_value = get_adc_value(ADC_CHANNEL_1);
-	    adc_sum += spd_value;
-	   }
-      spd_value = 0;
-	  spd_value = adc_sum / 50;
-      motor_speed_pot = map( spd_value,  00, 4095, 0, 100);
-	//	motor_speed_pot = (spd_value - 1) * (100 - 1) /  ( 4020 - 1) + 1;
-
-}
-
-
-
 void back_dis()
 {
   //  int b = 1;
+	row_pos1 = 0;
 	lcd_clear(); //lcd_put_cur(0, 1); lcd_string_new("[Back]");
 //	lcd_put_cur(0,0); lcd_string_new(">");
-	lcd_put_cur(0, 1); lcd_string_new("[Back]");
 	lcd_put_cur(0,0); lcd_string_new(">");
+	lcd_put_cur(0, 1); lcd_string_new("[Back]");
+   // pressed = 1;
 	HAL_Delay(300);
     button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-	read_joystic(); HAL_Delay(5);
+	read_joystic(); //HAL_Delay(5);
 
- while ( button != 0 &&  y_value  <= 3000 )
+  while ( button != 0 &&  y_value  <= 3000  )
    {
 	   button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
        read_joystic(); HAL_Delay(1);
 	}
 
+//	while ( pressed == 1  )
+//	{
+//		read_joystic();	 button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+//		 if   ((y_value <= 2900) && (y_value > 1000))
+//			   {
+//				  j_toggle1 = 1;  HAL_Delay(1);
+//				  button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+//				  if (button == 0)
+//					   {
+//						lcd_clear();
+//						live_flag = 0;
+//						pressed = 0;
+//						prev_row_pos = 0;
+//						auto_unl();  /// call back to auto unlimted limt function
+//					   //HAL_Delay(0);
+//					  }
+//
+//			   }
+//
+//		 else if ((y_value >= 3000 ) && (y_value <= 4095) && ( j_toggle1 == 1) )
+//		 	  {
+//			   j_toggle1 = 0; // row_pos = 4;
+//			   pressed = 0;
+//			  }
+//
+//		 else if ((y_value <= 800) && (y_value >= 0 ) && ( j_toggle1 == 1))
+//			   {
+//			     j_toggle1 = 0; //row_pos = 3;
+//			     pressed = 0;
+//			  }
+//	}
+//
+//	lcd_clear();
+//	pressed = 0;
+//
+//}
 
-  if (button == 0)
+
+ ///////////////////
+
+//
+   if (button == 0)
 	   {
 		lcd_clear();
 		live_flag = 0;
-		pressed = 1;
-		row_pos = 4;
-		//auto_unl();  /// call back to auto unlimted limt function
+		pressed = 0;
+		prev_row_pos = 0;
+		auto_unl();  /// call back to auto unlimted limt function
 	   //HAL_Delay(0);
 	  }
   else if ( button == 1)
   {
    lcd_clear();
-   lcd_put_cur(0, 1);lcd_string_new("[Free Ride]");lcd_put_cur(1, 1); lcd_string_new("[Recording]");
-   lcd_put_cur(2, 1);lcd_string_new("[Playback]  0s");lcd_put_cur(3, 1); lcd_string_new("[VideoLoop]");
-   lcd_put_cur(0,0);lcd_string_new(">");
-   row_pos = 0;
-   HAL_Delay(5);
+   row_pos = 4;
+   pressed = 0;
+//  // prev_row_pos = 0;
+////   lcd_put_cur(0, 1);lcd_string_new("[Free Ride]");lcd_put_cur(1, 1); lcd_string_new("[Recording]");
+////   lcd_put_cur(2, 1);lcd_string_new("[Playback]  0s");lcd_put_cur(3, 1); lcd_string_new("[VideoLoop]");
+////   lcd_put_cur(0,0);lcd_string_new(">");
+////   row_pos = 0;
+//
   }
 
 }
 
 
 
+//***********************************************************//
 
-//////  Automatic UNL sub functions  //////////
+				//******** LIVE FUNCTION   ***********//
+
+//***********************************************************//
+
 
   void live_fun()                  //FRPV_fun()
 {
 /////
-
       lcd_clear();
+      working_mode = 'G';
+	  direction = 'S';
+	  data_transmit();
       live_flag = 1;
-      pressed = 0;
+      pressed = 1;
+      exit_flag = 0;
+      row_pos1 = 0;
+      prev_row_pos = 0;
+
     //  unl_flag = 1;
   while (live_flag == 1)
   {
-	  row_pos = 0;
-	  row_pos1 = 0;
+
+	  row_pos = prev_row_pos;
 	  lcd_put_cur(0, 1);lcd_string_new("[Free Ride]");lcd_put_cur(1, 1); lcd_string_new("[Recording]");
 	  lcd_put_cur(2, 1);lcd_string_new("[Playback]  0s");lcd_put_cur(3, 1); lcd_string_new("[VideoLoop]");
-      lcd_put_cur(0,0);lcd_string_new(">");
-      HAL_Delay(800);
+      lcd_put_cur(row_pos,0);lcd_string_new(">");
+      HAL_Delay(200);
       button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
 
-       while( button != 0 && pressed == 0)
+       while( button != 0 && pressed == 1)
      {
 
 	      button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-	      read_joystic(); HAL_Delay(1);
-	  	  	  /// arrow movement
-//      if ((y_value >= 3000) && (y_value < 4095))
-//	     {
-//	        lcd_put_cur(row_pos,0); lcd_string_new(" ");
-//	        row_pos++;
-//	     if (row_pos >= 4)
-//	       {
-//	    	 row_pos = 0;
-//	    	 back_dis();
-//
-//	       }
-//
-//            lcd_put_cur(row_pos,0);lcd_string_new(">");
-//	        HAL_Delay(250);
-//	      }
-
-  //////////////
+	      read_joystic();
 
       if ((y_value <= 2900) && (y_value > 1000))
         {
-    	   j_toggle1 = 1;  HAL_Delay(2);
+    	   j_toggle1 = 1;  HAL_Delay(1);
+    	 //  if (row_pos1 >= 4 || row_pos1 == 255) { back_dis(); }
+
+
         }
 
       else if ((y_value >= 3000 ) && (y_value <= 4095) && ( j_toggle1 == 1) )
        {
-     	  j_toggle1 = 0;   //cursor_pos++;
-     	  lcd_put_cur(row_pos,0); lcd_string_new(" ");
-          row_pos++; row_pos1++;  if (row_pos >= 4) {  back_dis(); }
+     	   j_toggle1 = 0;   //cursor_pos++;
+     	   lcd_put_cur(row_pos,0); lcd_string_new(" ");
+           row_pos++;
+           if (row_pos >= 4) { back_dis(); }
           lcd_put_cur(row_pos,0); lcd_string_new(">");
+
+        //  row_pos1++;
+       //   arrow_down();
+
+
        }
 
        else if ((y_value <= 800) && (y_value >= 0 ) && ( j_toggle1 == 1))
          {
      	     j_toggle1 = 0;  //cursor_pos--;
-    	     lcd_put_cur(row_pos,0); lcd_string_new(" ");
-    	     row_pos--; row_pos1--; if(row_pos == 255) { back_dis(); }
+    	     lcd_put_cur(row_pos, 0); lcd_string_new(" ");
+    	     row_pos--;
+    	     if(row_pos == 255) { back_dis(); }
     	     lcd_put_cur(row_pos,0);lcd_string_new(">");
+
+    	 //    row_pos1--;
+    	//     arrow_up();
+
          }
      // button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
 
      }
 
- /////////////////
+      /////////////////
 
 	   switch(row_pos)
 	   {
@@ -951,334 +1216,505 @@ void back_dis()
 	   	 free_ride_fun(); break;
 
 	   	 case 1:
-	   	 Recording_fun(); break;
+	   	 Recording_fun();
+	    	prev_row_pos = 1;
+	   	 break;
 
 	   	 case 2:
-	   	 Playback_fun();  break;
+	   	 Playback_fun();
+	   	 prev_row_pos = 2;
+	   	 break;
 
 	   	 case 3:
-	   	 Videoloop_fun(); break;
+	   	 Videoloop_fun();
+	     prev_row_pos = 3;
+	   	 break;
 
 	   	 case 4:
-	   		 row_pos = 0;
-//  	   			 lcd_clear();
-//	   			 HAL_Delay(50);
-//	   			 lcd_put_cur(0, 1); lcd_string_new("[Back]");
-//	   			 lcd_put_cur(0,0); lcd_string_new(">");
-//	   			 HAL_Delay(300);
-//	   			 button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-//	   			 read_joystic(); HAL_Delay(1);
-//	    	 while ( button != 0 && y_value  <= 3000) //&& y_value >= 900 )
-//	   		   {
-//	   			   button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-//	   		       read_joystic(); HAL_Delay(1);
-//	   		  }
+	   		 prev_row_pos = 0;
+	   		 pressed = 1;
+//  	   		 lcd_clear();
+//  	   	     lcd_put_cur(0,0); lcd_string_new(">");
+//             lcd_put_cur(0, 1); lcd_string_new("[Back]");
+//             HAL_Delay(1000);
+//             read_joystic();
+////	   			 button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+//           while ((y_value <= 3450) && (y_value > 900))
+//             {
+//        	   button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+//        	   read_joystic(); HAL_Delay(1);
+//          	 if ( button == 0 )
+//	    	 {
+//				lcd_clear();  //exit_flag = 1;
+//				exit_flag = 0;
+//				prev_row_pos = 0;
+//				auto_unl();  /// call back to auto unlimted limt function
+//				//live_flag = 0;   // live flag is clear to go back to auto unl function
+//				exit_flag = 0;
+//				prev_row_pos = 0;
+//	    	  }
 //
-//	   		  if (button == 0)
-//	   			  {
-//	   				lcd_clear();  //exit_flag = 1;
-//	   				HAL_Delay(1);
-//	   				//auto_unl();  /// call back to auto unlimted limt function
-//                    live_flag = 0;   // live flag is clear to go back to auto unl function
-//	   			   }
-    		  break;
-
-	       }
+//             }
+//            row_pos1 = 0;
+            break;
+        }
+	 //  prev_row_pos = row_pos;
 
 
 	  // if (exit_flag == 1)  { HAL_Delay(100); auto_unl(); }  // call back to auto unl function for loop
        }
     lcd_clear();
-    HAL_Delay(150);
+    prev_row_pos = 0;
+   // HAL_Delay(50);
  }
 
 
 
-void timelapse_fun()
-{ // hold = 0;
-	HAL_Delay(50);
-}
+
+  //***********************************************************//
+
+       	//******** TIMELAPSE FUNCTION  ***********//
+
+  //------------------ START --------------------//
 
 
-//************ Animation mode function ************************//
-
-
-void animation_fun()
-{
-//	int cursor_pos = 0;
- //   int j_toggle = 0;
-    animation_flag = 1;
-	row_pos = 0;
-	exit_flag = 1;
-	HAL_Delay(100);
-	lcd_clear();
-//	lcd_put_cur(0, 1); lcd_string_new("Direction:Right");
-//	lcd_put_cur(1, 1); lcd_string_new("HomePos:<     >"); lcd_put_cur(1, 11); lcd_int_to_str(home_pos);
-//	lcd_put_cur(2, 1); lcd_string_new("Step:   <     >"); lcd_put_cur(2, 11); float_to_string(step);
-//	lcd_put_cur(3, 1); lcd_string_new("Steps:  <     >"); lcd_put_cur(3, 11); lcd_int_to_str(steps);
-//	lcd_put_cur(0,0);lcd_string_new(">");
-//	button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-//	button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-//	read_joystic(); HAL_Delay(5);
-//    HAL_Delay(50);
-
-  while ( animation_flag == 1  )
-{
-
-    if ((cursor_pos >= 0) &&  (cursor_pos <= 4))
+  void time_cancle_stop()   // Time lapse STOP, PAUSE , CANCLE function
   {
+	uint8_t spc = 0;
+  //  direction = 'S';
+  //  data_transmit();
+    lcd_clear();
+    lcd_put_cur(1, 2); lcd_string_new("CANCLE/STOP  ?");
+    lcd_put_cur(2, 3); lcd_string_new("< CANCLE >");
+    HAL_Delay(150);
+    button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
 
- 	lcd_put_cur(0, 1); lcd_string_new("Direction:Right");
-	lcd_put_cur(1, 1); lcd_string_new("HomePos:<     >"); lcd_put_cur(1, 11); lcd_int_to_str(home_pos);
-	lcd_put_cur(2, 1); lcd_string_new("Step:   <     >"); lcd_put_cur(2, 11); float_to_string(step);
-	lcd_put_cur(3, 1); lcd_string_new("Steps:  <     >"); lcd_put_cur(3, 11); lcd_int_to_str(steps);
-	lcd_put_cur(0,0);lcd_string_new(">");
-	cursor_pos =1; row_pos = 0;
-////////// First screen of the animaion ///////
-
-	 read_joystic(); //HAL_Delay(5);
-
-     while( cursor_pos >= 1 &&  cursor_pos <= 4 )
-   {
-
-      read_joystic();  //HAL_Delay(5);
-      if ((y_value <= 2900) && (y_value > 1000))
-        {
-    	  j_toggle1 = 1;  //HAL_Delay(2);
-        }
-
-      else if ((y_value >= 3000 ) && (y_value <= 4095) && ( j_toggle1 == 1) )
-       {
-    	  cursor_pos++;
-          j_toggle1 = 0;
-          lcd_put_cur(row_pos,0); lcd_string_new(" ");  if ( row_pos <= 3) { row_pos++; }     // row_pos++;  if (row_pos >= 4) { row_pos = 0; }
-          lcd_put_cur(row_pos,0); lcd_string_new(">"); // HAL_Delay(100);
-       }      //back_dis();
-
-       else if ((y_value <= 800) && (y_value >= 0 ) && ( j_toggle1 == 1))
-         {
-    	   cursor_pos--; if (cursor_pos >= 255) { cursor_pos = 8;}
-    	   j_toggle1 = 0;
-    	   lcd_put_cur(row_pos,0); lcd_string_new(" ");
-    	   row_pos--; if(row_pos >= 255) { row_pos = 0; }
-    	   lcd_put_cur(row_pos,0);lcd_string_new(">"); //HAL_Delay(100);
-         }
-
-
-	 switch(row_pos)
-	   {
-	    case 0:   //  set the direction of the motor Left or Right
-	    	 	 while( y_value <= 2500 && y_value > 1000 )
-	    	  {
-	    	 	read_joystic(); HAL_Delay(3);
-                if (x_value <= 900) { motor_lr = 1;  }
-            	else if (x_value >= 3000) { motor_lr = 0;  }
-                if (motor_lr == 1) {lcd_put_cur(0,11);lcd_string_new("Right");   }    //HAL_Delay(150);
-                else if (motor_lr == 0 ) { lcd_put_cur(0,11); lcd_string_new(" Left"); } //HAL_Delay(150);
-
-	    	  }   //HAL_Delay(50);
-
-	    	 	 break;
-
-	   	 case 1: //  set the home position of the motor
-	   		     while( y_value < 2500 && y_value > 1000 )
-	   		    {
-	   		     read_joystic(); HAL_Delay(3);
-	   		     if (x_value <= 900) { home_pos++; lcd_put_cur(1,11); lcd_int_to_str(home_pos);  HAL_Delay(150); }
-	   		  	 else if (x_value >= 3000) { home_pos--; lcd_put_cur(1,11);lcd_int_to_str(home_pos);  HAL_Delay(150); }
-
-	   		    }  // HAL_Delay(50);
-	   		     break;
-
-	   	 case 2: // set the motor step to increment or decrement during movement
-	   	 	 	 while( y_value < 2500 && y_value > 1000  )  { read_joystic(); HAL_Delay(3);
-	   	 	 	 if (x_value <= 900) { step = step + 0.1; lcd_put_cur(2,11); float_to_string(step);  HAL_Delay(150); }
-	   	 	 	 else if (x_value >= 3000) { step = step - 0.1; if( step <= 0.0) { step = 0.0; }
-	   	 	 	 lcd_put_cur(2,11);float_to_string(step); HAL_Delay(150); }
-
-		       } // HAL_Delay(50);
-	   	 	 	 break;
-
-	   	 case 3:  // Set the no of steps for the animation mode
- 		        while( y_value < 2500 && y_value > 1000 )
- 		        { read_joystic(); HAL_Delay(3);
- 		        if (x_value <= 900) { steps++; lcd_put_cur(3,11); lcd_int_to_str(steps); HAL_Delay(150); }
- 		    	else if (x_value >= 3000) { steps--; if(steps >= 255) { steps = 0; }}
- 		  		lcd_put_cur(3,11);lcd_int_to_str(steps);  HAL_Delay(150);
-
- 		        } // HAL_Delay(50);
- 		        break;
-	    }
-      }
-   }
-
-     if ((cursor_pos >=5) && (cursor_pos <=8))
+    while (button !=0 )
     {
-          //////////////  Animation second screen display ////////////
-    	lcd_clear();
-    	row_pos = previous_pos;
-        lcd_put_cur(row_pos,0);lcd_string_new(">");
-        lcd_put_cur(0, 1); lcd_string_new("Shots:      < >");  lcd_put_cur(1,14); lcd_int_to_str(shots);
-        lcd_put_cur(1, 1); lcd_string_new("Delay:     < s>"); lcd_put_cur(1,13); lcd_int_to_str(delay_val);
-        lcd_put_cur(2, 1); lcd_string_new("[Start]");
-        lcd_put_cur(3, 1); lcd_string_new("<BACK>");
+     button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+     read_joystic();
 
-    	    while( cursor_pos >= 5 &&  cursor_pos <= 8 )
-    	   {
+         if ((x_value >= 2500 ) && (x_value <= 4095) && ( j_toggle1 == 1) )
+  		   {  j_toggle1 = 0;
 
-    	      read_joystic(); // HAL_Delay(5);
-    	      if ((y_value <= 2900) && (y_value > 1000))
-    	      {
-    	    	  j_toggle1 = 1; //HAL_Delay(2);
-    	      }
+  		   if (spc > 0) {spc--;}
 
-    	      else if ((y_value >= 3000 ) && (y_value <= 4095) && ( j_toggle1 == 1) )
-    	       {
-    	    	  cursor_pos++; if(cursor_pos >=9 ) {cursor_pos = 0;}
-    	    	  j_toggle1 = 0;
-    	          lcd_put_cur(row_pos,0); lcd_string_new(" ");  if ( row_pos <= 3) { row_pos++; }     // row_pos++;  if (row_pos >= 4) { row_pos = 0; }
-    	          lcd_put_cur(row_pos,0); lcd_string_new(">"); // HAL_Delay(100);
-    	       }      //back_dis();
+  		   }
 
-    	       else if ((y_value <= 800) && (y_value >= 0 ) && ( j_toggle1 == 1))
-    	         {
-    	    	   cursor_pos--;
-    	    	   j_toggle1 = 0;
-    	    	   lcd_put_cur(row_pos,0); lcd_string_new(" ");
-    	    	   row_pos--; if(row_pos < 0) { row_pos = 0; }
-    	    	   lcd_put_cur(row_pos,0);lcd_string_new(">"); //HAL_Delay(100);
-    	         }
+  		 else if ((x_value <= 900) && (x_value >= 0 ) && ( j_toggle1 == 1))
+  		  {  j_toggle1 = 0;
 
-    	       previous_pos = row_pos;
-        		 switch(row_pos)
-        		   {
-        		  	 case 0:    // set the no. of shots to be taken
-        		  	 	 	 while( y_value <= 2500 && y_value > 1000 )
-        		  	 	 	 	{
-        		  	 	 		   read_joystic(); HAL_Delay(3);
-         		  	 	 	 	if (x_value <= 900)
-        		  	 	 	 	 {   shots++;  if (shots > 9) { shots = 0; }
-        		  	 	 	 	     lcd_put_cur(0,14); lcd_int_to_str(shots); HAL_Delay(150); }
-        		  	 	 	 	else if (x_value >= 3000) { shots--; if(shots >= 255) { shots = 0; } }
-        		  	 	 	 	lcd_put_cur(0,14);lcd_int_to_str(shots);  HAL_Delay(150);
+  		  spc++; if (spc > 2) {spc = 0;}
 
-        		  	 	 	   } 	//HAL_Delay(50);
+  		  }
 
-        		  		 break;
+  		 else if ((x_value <= 2400) && (x_value > 1000))
+  		  {  j_toggle1 = 1;
 
-        		   	 case 1:  //  set the  delay between shots data
-        		   	 	 	 while ( y_value < 2500 && y_value > 1000 )
-        		   	 	 {
-        		   	 	 		 read_joystic(); HAL_Delay(3);
-        	 	   	 	 	 if (x_value <= 900)
-        		   	 	 	 {
-        		   	 	 	 delay_val++; if (delay_val > 9) { delay_val = 0; }
-        		   	 	 	 lcd_put_cur(1,13); lcd_int_to_str(delay_val);
-        		   	 	 	 HAL_Delay(150); }
 
-        		   	 	 	 else if (x_value >= 3000)
-        		   	 	 	 { delay_val--; if(delay_val >= 255) { delay_val = 0; }
-        		   	 	 	 }
-        		   	 	 	 lcd_put_cur(1,13); lcd_int_to_str(delay_val);   HAL_Delay(150);
-
-        		   	 	 } // HAL_Delay(50);
-
-        		   		 break;
-
-        		   	 case 2:    // call to the start function
-                           while( y_value <= 2500 && y_value > 1000 )
-                         {
-                            read_joystic(); HAL_Delay(2);
-                            button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-                            if (button == 0)
-                            {
-                               lcd_clear(); start_flag = 1;
-                               start_fun();
-                            }
-                         }
-        		   		 break;
-
-        		   	 case 3:  // call back to live function
-        		   		  //HAL_Delay(1);  //read_joystic(); HAL_Delay(2);
-           		  	 	  while( y_value <= 2500 && y_value > 1000 && exit_flag == 1 )
-        		            {
-        		   		       read_joystic(); HAL_Delay(2);
-        		   		       button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-        		   		     if (button == 0)
-        		   		       {
-        		   		    	   animation_flag = 0; exit_flag = 0;
-        		   		    	  lcd_clear();
-        		   		         cursor_pos = 0; previous_pos = 0; auto_unl();
-        		   		       }
-
-        		   		    }  //HAL_Delay(50);
-
-        		   		  break;
-         }
+  		}
+         if (spc == 0){ lcd_put_cur(2, 3);          lcd_string_new("< CANCLE >");}
+         else if  (spc == 1 ) { lcd_put_cur(2, 3);  lcd_string_new("<  PAUSE >");}
+         else if  (spc == 2 ) {lcd_put_cur(2, 3);   lcd_string_new("<  STOP  >");}
        }
-     }
-    }
-  }
 
-  //******* Animation start function
+      switch(spc)
+     {
+      case 0: // do nothing go back to start function
+    	 // time_start();
+    	  break;
+
+      case 1:  // pause the funciton
+          direction = 'S';
+          data_transmit();
+          lcd_clear();
+          lcd_put_cur(2, 0); lcd_string_new("Press OK To Pause");
+          button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+
+          while (button != 0)
+          { button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+
+          }
+          break;
+
+      case 2:  // stop the operation of timelapse function
+          direction = 'S';
+          data_transmit();
+          prev_row_pos = 4;
+         // time_screen2();
+          lcd_clear(); prev_row_pos = 3; time_screen2();
+    	  break;
+
+      }
+
+
+ }
 
 
 
-void start_fun(void)
+void time_start()  // Timelapse star function to run the motor according to set parameters
 {
-      new_home_pos = home_pos;
-      wait_sec = delay_val * 1000;
-      current_pos = current_pos + home_pos;
-      step_start_fun();
-
-	  button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-
-	   while( button != 0 )	 /////// pause and exit scan
+	HAL_Delay(150);
+	button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+	while (button != 0 )
 	{
 
-		button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-		read_joystic(); HAL_Delay(2);
+	button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+	time_cancle_stop();
 
-       if ( x_value <= 900)
-       {
-    	   if(steps_count < steps)
-    	   {
-    		   steps_count++; lcd_put_cur(2,0); lcd_int_to_str(steps_count);
-    		   current_pos = current_pos + step;
-    		   HAL_Delay(250);
-    		   step_start_fun();
-    	   }
-        }
-
-       else if (x_value >= 3000)
-       {
-    	   if(steps_count > 0)
-    	   {
-    		 steps_count--;
-    		 lcd_put_cur(2,0); lcd_int_to_str(steps_count);
-    		 current_pos = current_pos - step;
-    		 HAL_Delay(250);
-    		 step_start_fun();
-    	   }
-       }
-
-     }
-
-	   pause_stop_fun();
+	}
 
 }
 
-/// animation step, shot and shots count function
 
-void step_start_fun()
+void time_screen3()    //  screen 3 of timelapse function
 {
-	//int j = 0;
-	//int k = 0;
+  lcd_clear();  row_pos = prev_row_pos;
+  lcd_put_cur(0,0);  lcd_string_new(">");  lcd_put_cur(0, 1); lcd_string_new("<BACK>");
+  button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
 
-	 lcd_put_cur(1, 1); lcd_string_new("ANIM  dir"); lcd_put_cur(1,10);
-	 if (motor_lr == 1) { lcd_string_new("R"); } else { lcd_string_new("L");
-	 }
-	 lcd_put_cur(1,12); float_to_string(current_pos);
+	while( button != 0 &&  cursor_pos == 9 ) {
+		  button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+		  get_row_pos(); //get the row position on the lcd
+
+	   }
+
+      if (button == 0) {lcd_clear(); prev_row_pos = 1; auto_unl();} // go back to the main function
+	  if (cursor_pos >=10 ) { prev_row_pos = 0; cursor_pos = 1; time_screen1();}
+	  else if (cursor_pos <= 8 ) {prev_row_pos = 3; cursor_pos = 8; time_screen2();}
+
+}
+
+void time_screen2()     // screen 2 of timelaspe function
+{
+    	lcd_clear();
+	    row_pos = prev_row_pos;
+		lcd_put_cur(0, 1); lcd_string_new("Shots:  <     >"); lcd_put_cur(0,10); lcd_int_to_str(shots);
+		lcd_put_cur(1, 1); lcd_string_new("Duration:     ");  // lcd_put_cur(1, 11); lcd_int_to_str(home_pos);
+		lcd_put_cur(2, 1); lcd_string_new("Step:   <    >");  lcd_put_cur(2,10); float_to_string(step);
+		lcd_put_cur(3, 1); lcd_string_new("[Start]");
+		lcd_put_cur(row_pos,0);  lcd_string_new(">");
+
+		while( cursor_pos >= 5 &&  cursor_pos <= 8 )
+	   {
+		    	get_row_pos();  // get the row position on the lcd
+			 switch(row_pos)
+		   {
+			case 0:   //  set the No of shots to be taken
+					read_joystic();
+					if (x_value <= 900)	{
+						if (shots < 30000 ) { shots++; } lcd_put_cur(0,10); lcd_int_to_str(shots); HAL_Delay(150); }
+					else if (x_value >= 3000) {
+						if ( shots > 0 ) { shots--; }  lcd_put_cur(0,10);lcd_int_to_str(shots);  HAL_Delay(150); }
+			   break;
+
+		  	 case 1: //  calculation of the time duration
+			    	 read_joystic();
+
+			    break;
+
+			 case 2: // set to No of steps to be motor move forward or backward
+					 read_joystic();
+					if (x_value <= 900) {
+						if (step < 360.0 ) { step++;}  lcd_put_cur(2,10); float_to_string(step); HAL_Delay(150); }
+					else if (x_value >= 3000) {
+						if ( step > 0.0) { step--; }   lcd_put_cur(2,10);float_to_string(step);  HAL_Delay(150); }
+					 break;
+
+			 case 3:   // go to the START Function of the timelapse
+				   button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+				   if (button == 0)
+				   {HAL_Delay(50);
+				    time_start();
+				   }
+				break;
+			}
+
+			//}
+		  }
+
+		 	if (cursor_pos <= 4 ) { prev_row_pos = 3; time_screen1();}
+		    else if (cursor_pos >= 9) { prev_row_pos = 0; cursor_pos = 9; time_screen3(); }
+
+}
+
+
+void time_screen1()     // screen 1 of timelapse function
+{
+        lcd_clear();
+	    row_pos = prev_row_pos;
+		lcd_put_cur(0, 1); lcd_string_new("Mode:     ");
+		lcd_put_cur(1, 1); lcd_string_new("Direction:     "); // lcd_put_cur(1, 11); lcd_int_to_str(home_pos);
+		lcd_put_cur(2, 1); lcd_string_new("Interval:<   s>"); lcd_put_cur(2, 11); lcd_int_to_str(interval_val);
+		lcd_put_cur(3, 1); lcd_string_new("Expos: <     s>"); lcd_put_cur(3, 11); float_to_string(expos_val);
+		lcd_put_cur(row_pos,0);  lcd_string_new(">");
+	//	cursor_pos =1; row_pos = 0;
+
+
+		 while( cursor_pos >= 1 &&  cursor_pos <= 4 )
+	   {
+		    	 get_row_pos();   //get the row position on the lcd
+				 switch(row_pos)
+		   {
+			case 0:   //  Set the mode of timelapse Continuous / SDS
+					read_joystic();
+					if (x_value <= 900) { motor_lr = 1;  }
+					else if (x_value >= 3000) { motor_lr = 0;  }
+					if (motor_lr == 1) {lcd_put_cur(0,6);lcd_string_new("Continuous");   }    //HAL_Delay(150);
+					else if (motor_lr == 0 ) { lcd_put_cur(0,6); lcd_string_new("       SDS"); } //HAL_Delay(150);
+			 break;
+
+			 case 1: //  Set the direction of the motor Right / Left
+			    	 read_joystic();          // HAL_Delay(3);
+					if (x_value <= 900) { motor_lr = 1;  }
+					else if (x_value >= 3000) { motor_lr = 0;  }
+					if (motor_lr == 1) {lcd_put_cur(1,11);lcd_string_new("Right");   }    //HAL_Delay(150);
+					else if (motor_lr == 0 ) { lcd_put_cur(1,11); lcd_string_new(" Left"); } //HAL_Delay(150);
+					 break;
+
+			 case 2: // Set the Interval value
+					 read_joystic();
+					if (x_value <= 900) {
+						 if (interval_val < 600) { interval_val++;}  lcd_put_cur(2,11); lcd_int_to_str(interval_val);
+						 HAL_Delay(150);  }
+					else if (x_value >= 3000) {
+						 if (interval_val >= 1 ) { interval_val--; }
+                        lcd_put_cur(2,11);lcd_int_to_str(steps);  HAL_Delay(150); }
+					 break;
+
+			 case 3:  // Set the Expos value
+					read_joystic();
+					if (x_value <= 900) {
+						if(expos_val < 360.0 ) { expos_val++;} lcd_put_cur(3,10); float_to_string(expos_val);  HAL_Delay(150); }
+					else if (x_value >= 3000)  {
+						if(expos_val > 0.0)    { expos_val--;} lcd_put_cur(3,10); float_to_string(expos_val);  HAL_Delay(150); }
+					break;
+			}
+
+			//}
+		  }
+
+		  if (cursor_pos <= 0 ) { cursor_pos = 9; prev_row_pos = 0; time_screen3(); }
+		  else if (cursor_pos >= 5) { prev_row_pos = 0; time_screen2();  }
+
+}
+
+
+
+void timelapse_fun()
+{
+		working_mode = 'T';
+		direction = 'S';
+	//	data_transmit();
+		timelapse_flag = 1;
+		//HAL_Delay(50);
+		cursor_pos = 1;
+		prev_row_pos = 0;
+
+	while (timelapse_flag == 1)
+	{
+		time_screen1();
+
+	}
+
+}
+
+
+//------------------ TIMELAPSE ENG ------------------//
+
+
+
+
+
+//***********************************************************//
+
+//******** ANIMATION FUNCTION  ***********//
+
+//***********************************************************//
+
+//------------------ START --------------------//
+
+
+void ani_steps()  // calculate the steps in animation mode
+{
+	 switch(man_unl_mode)
+		 {
+		 case 'U':  // UNL mode unlimited limits
+		    read_joystic();
+		    if (x_value <= 900) { if ( steps < 999 ) { steps++;} lcd_put_cur(3,10);   lcd_int_to_str(steps);
+		    HAL_Delay(50);  }
+			else if (x_value >= 3000) { if (steps > 0 ) {steps--;} lcd_put_cur(3,10); lcd_int_to_str(steps);
+			HAL_Delay(50); }
+
+		  break;
+
+
+		 case 'M':  // MAN mode limits are set
+			 // motor will move to Left direction home position
+			if ( motor_move == 'L') {
+				steps_limit = home_pos / step;  // steps = steps_limit;                   //lcd_put_cur(3,10); lcd_int_to_str(steps);
+			  }
+			// motor will move to Right Direction from home position
+			else if (motor_move == 'R') {
+		        steps_limit = ( fixed_limit - home_pos) / step;  //steps = steps_limit;    //lcd_put_cur(3,10); lcd_int_to_str(steps);
+			}
+
+			read_joystic();
+
+			if (x_value <= 900) {
+				if ( steps > steps_limit) {steps = 0;} else if (steps < steps_limit) { steps++;} lcd_put_cur(3,10);
+			     lcd_int_to_str(steps);  HAL_Delay(100); }
+			else if (x_value >= 3000) { if (steps > 0 ) { steps--;}    lcd_put_cur(3,10); lcd_int_to_str(steps);
+			HAL_Delay(100); }
+
+			break;
+		 }
+
+}
+
+void ani_home()  // set the home position in animation mode
+{
+	 switch(man_unl_mode)
+		 {
+
+		 case 'U':  // UNL mode unlimited limits
+			read_joystic();
+			if (x_value <= 900) {
+				home_pos++; lcd_put_cur(1,10); lcd_int_to_str(home_pos); HAL_Delay(50); }
+			else if (x_value >= 3000) {
+				home_pos--; lcd_put_cur(1,10);lcd_int_to_str(home_pos);  HAL_Delay(50);}
+		   break;
+
+		 case 'M':  // MAN mode limits are set
+			read_joystic();
+			if (x_value <= 900) {
+				if (home_pos < fixed_limit) {home_pos++;}
+			    lcd_put_cur(1,10); lcd_int_to_str(home_pos); HAL_Delay(50); }
+			else if (x_value >= 3000) {
+				if (home_pos > 0) {home_pos--;}
+			    lcd_put_cur(1,10);lcd_int_to_str(home_pos);   HAL_Delay(50); }
+		        // steps_limit = home_pos / step; steps = steps_limit; // calculate the steps according to the Home_pos and step of motor
+		   break;
+		 }
+
+}
+
+
+
+ void ani_screen1()  //  first screen of the Animation mode
+ {
+	    lcd_clear();
+        row_pos = prev_row_pos;
+	  	lcd_put_cur(0, 1); lcd_string_new("Direction:     "); lcd_put_cur(0,11);
+	  	if (motor_move == 'L') lcd_string_new(" Left"); else if (motor_move == 'R') lcd_string_new("Right");
+		lcd_put_cur(1, 1); lcd_string_new("HomePos:<     >"); lcd_put_cur(1, 10); lcd_int_to_str(home_pos);
+		lcd_put_cur(2, 1); lcd_string_new("Step:   <     >"); lcd_put_cur(2, 10); float_to_string(step);
+		lcd_put_cur(3, 1); lcd_string_new("Steps:  <     >"); lcd_put_cur(3, 10); lcd_int_to_str(steps);
+		lcd_put_cur(row_pos,0);  lcd_string_new(">");
+
+	     while( cursor_pos >= 1 &&  cursor_pos <= 4 )
+	   {
+	    	    get_row_pos();  //get the row position on the lcd
+	        	 switch(row_pos)
+		   {
+		    case 0:   //  set the direction of the motor Left or Right
+				read_joystic();
+				if (x_value <= 900) { motor_move = 'R'; lcd_put_cur(0,11); lcd_string_new("Right");}
+			    else if (x_value >= 3000) { motor_move = 'L';  lcd_put_cur(0,11); lcd_string_new(" Left");}
+
+				break;
+
+		   	case 1: //  set the home position of the motor
+		   		ani_home();
+
+				 break;
+
+		    case 2: // set the motor step to increment or decrement during movement
+				 read_joystic();
+				 if (x_value <= 900) { if (step < 99.9 ) { step += 0.1;} lcd_put_cur(2,10); float_to_string(step);     HAL_Delay(10); }
+				 else if (x_value >= 3000) { if ( step > 0.1) { step -= 0.1;} lcd_put_cur(2,10);float_to_string(step); HAL_Delay(10); }
+				 //steps_limit = home_pos / step; steps = steps_limit; // calculate the steps according to the Home_pos and step of motor
+			   break;
+
+		   	case 3:  // Set the no of steps for the animation mode
+		   		 ani_steps();
+
+		     break;
+		    }
+
+
+	      }
+	     if (cursor_pos <= 0 ) { cursor_pos = 8; prev_row_pos = 3; ani_screen2(); }
+	     else if (cursor_pos >= 5) { prev_row_pos = 0; ani_screen2();  }
+
+
+ }
+
+
+ void ani_screen2()   // second screen of the Animation mode
+ {
+	        lcd_clear();
+	       	row_pos = prev_row_pos;
+	        lcd_put_cur(0, 1); lcd_string_new("Shots:      < >");  lcd_put_cur(0,14); lcd_int_to_str(shots);
+	        lcd_put_cur(1, 1); lcd_string_new("Delay:     < s>");  lcd_put_cur(1,13); lcd_int_to_str(delay_val);
+	        lcd_put_cur(2, 1); lcd_string_new("[Start]");
+	        lcd_put_cur(3, 1); lcd_string_new("<BACK>");
+	        lcd_put_cur(row_pos,0);lcd_string_new(">");
+
+	        HAL_Delay(150);
+
+			while( cursor_pos >= 5 &&  cursor_pos <= 8 )
+		   {
+		      get_row_pos();  //get the row position on the lcd
+		      switch(row_pos)
+		   {
+			 case 0:    // set the no. of shots to be taken
+					read_joystic();
+					if (x_value <= 900) { if ( shots < 9 ) {shots++;}       lcd_put_cur(0,14); lcd_int_to_str(shots);  HAL_Delay(150); }
+					else if (x_value >= 3000) { if ( shots > 0 ) {shots--;} lcd_put_cur(0,14); lcd_int_to_str(shots);  HAL_Delay(150); }
+			 break;
+
+			 case 1:  //  set the  delay between shots data
+					read_joystic();
+					if (x_value <= 900) { if ( delay_val < 9 ) {delay_val++;}        lcd_put_cur(1,13); lcd_int_to_str(delay_val);  HAL_Delay(150); }
+					else if (x_value >= 3000) { if ( delay_val > 0 ) { delay_val--;} lcd_put_cur(1,13); lcd_int_to_str(delay_val);  HAL_Delay(150); } /////////////////
+
+				 break;
+
+			 case 2:    // call to the start function
+
+					button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+					if (button == 0) { lcd_clear(); start_flag = 1; start_fun(); }
+					break;
+
+			 case 3:  // call back to live function
+					//HAL_Delay(1);  //read_joystic(); HAL_Delay(2);
+					//  while( y_value <= 2000 && y_value > 1000 && exit_flag == 1 ) {
+					//       read_joystic();      //HAL_Delay(2);
+					button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+					if (button == 0)
+					{
+					animation_flag = 0; exit_flag = 0;
+					lcd_clear();
+					cursor_pos = 0; prev_row_pos = 2; auto_unl();
+					}
+
+					//    }  //HAL_Delay(50);
+
+				  break;
+			}
+		 // }
+
+	       }
+	    	    if (cursor_pos >= 9 ) { cursor_pos = 1; prev_row_pos = 0; ani_screen1(); }
+	    	  	else if (cursor_pos <= 4) { prev_row_pos = 3; ani_screen1();  }
+
+	   //  }
+
+ }
+
+void ani_step_display()
+{
 	 lcd_put_cur(2,0); lcd_string_new(" /            / ");
 	 lcd_put_cur(2,0); lcd_int_to_str(steps_count);
 	 lcd_put_cur(2,2); lcd_int_to_str(steps);
@@ -1286,73 +1722,379 @@ void step_start_fun()
 	 lcd_put_cur(2,13); lcd_int_to_str(shots_count);
 	 lcd_put_cur(2,15); lcd_int_to_str(shots);
 
+}
+
+
+//void step_calculation()
+//{
+//	new_home_pos = (home_pos * 10);
+//	// motor_move_step =   ((home_pos * 10) - rx_motor_step); 	// calculate the step to which motor move.
+//
+//	switch (new_home_pos)
+//	{
+//	case (new_home_pos > rx_motor_step):  // step are In Positive
+// 		// motor_move_step = labs(motor_move_step);
+//		motor_move_step = new_home_pos;
+//	    send_step_status = '+';
+//	    send_step();
+//		break;
+//
+//	case (new_home_pos < rx_motor_step):  // step are In Negative
+//		//motor_move_step = labs(motor_move_step);
+//		 motor_move_step = new_home_pos;
+//	     send_step_status = '-';
+//		 send_step();
+//		 		 break;
+//	}
+//
+//	 // check the motor_move_step is - or possitive
+//    if (motor_move_step < 0) { direction = 'B'; }   		 // motor move backward data is home_pos is less then
+//    else if (motor_move_step >= 0) { direction = 'F'; }	 // motor move forward data is home_pos is greater
+//
+//
+//
+//    motor_move_step = labs(motor_move_step);  				// convert the signed data into unsigned data
+//
+//    send_step();
+//    disp_motor_step(motor_step);
+//
+//
+//}
+
+
+
+ 	 //******* Animation start function
+
+void start_fun(void)
+{
+	 rx_data();
+	 motor_move_step =  rx_motor_step;                //( current_motor_step * 10);
+	 working_mode = 'A';    //
+	 direction = 'S';
+	 data_transmit();
+	// send_step();
+	 lcd_clear();
+     wait_sec = delay_val * 1000;
+     exit_flag = 1;
+     rx_data();
+     disp_motor_step(motor_step);
+	 lcd_put_cur(1, 1); lcd_string_new("ANIM dir");
+	 lcd_put_cur(1,9);  lcd_send_data(motor_move);
+	 lcd_put_cur(2, 0); lcd_string_new("Go Home? N<- ->Y");
+
+	 while (exit_flag == 1)       //((x_value <= 2900) && (x_value > 1000))
+	 {
+		 read_joystic();
+		 if ((x_value >= 3000 ) && (x_value <= 4095) )
+		 {
+			 disp_motor_step(motor_step);
+			 exit_flag = 0;
+		 }
+
+		 if ((x_value <= 800) && (x_value >= 0 ))
+		{
+//			 motor_move_step =   ((home_pos * 10) - rx_motor_step); 	// calculate the step to which motor move.
+//			  check the motor_move_step is - or possitive
+//	         if (motor_move_step < 0) { direction = 'B'; }   		 // motor move backward data is home_pos is less then
+//	         else if (motor_move_step >= 0) { direction = 'F'; }	 // motor move forward data is home_pos is greater
+//	         motor_move_step = labs(motor_move_step);  				// convert the signed data into unsigned data
+//	         send_step_status = 'M';
+//	         send_step();
+//	         HAL_Delay(200);
+//	         send_step_status = 'S';
+			// if ((home_pos * 10) > rx_motor_step )      { send_step_status = '+';  }
+		//	 else if ((home_pos * 10) < rx_motor_step ) { send_step_status = '-';  }
+			 motor_move_step = (home_pos * 10);
+			 data_transmit();
+
+//			 send_step();
+//			 HAL_Delay(50);
+//			 rx_data();
+//	         disp_motor_step(motor_step);
+	         exit_flag = 0;
+		}
+	  }
+
+   	  ani_step_display();     // display step, steps, shots,
+      step_start_fun();
+	  button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+
+    while( button != 0 )
+    {
+    	button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+    	read_joystic();
+    	exit_flag = 1;
+    	HAL_Delay(150);
+	    while ( button != 0 && exit_flag == 1)   //   (x_value <= 2400) && (x_value >= 1200))
+		 {
+	    	button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+	    	read_joystic();
+		   if (x_value <= 900)             //&& (x_value >= 0 ))    //&& ( j_toggle1 == 1))
+            {
+			  if(steps_count < steps) {
+    		   steps_count++;
+    		   lcd_put_cur(2,0); lcd_int_to_str(steps_count);
+    		   motor_move_step = ( rx_motor_step + (step * 10));    //(step * 10);
+    		 ///  send_step_status = '+';  //   direction = 'F';
+    		   HAL_Delay(100);
+    		   exit_flag = 0;
+    	     }
+           }
+
+			else if (x_value >= 3000 )     //&& (x_value <= 4095))    // && ( j_toggle1 == 1) )
+			 {
+				 if(steps_count > 0)  {
+				 steps_count--;
+				 lcd_put_cur(2,0); lcd_int_to_str(steps_count);
+				 rx_data();
+				 motor_move_step =  ( rx_motor_step - (step * 10));                   //(step * 10);
+			//	 send_step_status = '+';    // direction = 'B';
+				 HAL_Delay(100);
+				 exit_flag = 0;
+
+			   }
+	          }
+		  }
+
+		if(button == 0) {pause_stop_fun();}
+	//	rx_data();
+	//	disp_motor_step(motor_step);
+//		for( int j =0; j < wait_sec; j++)  // Delay count after motor move to next position
+//		{
+//			HAL_Delay(1);
+//			button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+//			if(button == 0){ pause_stop_fun(); }
+//		}
+			step_start_fun(); // call to the step start function
+    }
+}
+
+
+
+      //  animation step, shot and shots count function   //
+
+void step_start_fun()
+{
+
+	 while ( rx_motor_step != motor_move_step  )
+	 {
+		 rx_data();
+		 disp_motor_step(motor_step);
+		 data_transmit();
+	 }
+
+	 exit_flag = 1;
+		for( int j =0; j < wait_sec; j++)  // Delay count after motor move to next position
+		{
+			HAL_Delay(1);
+			button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+			if(button == 0){ pause_stop_fun(); }
+		}
+	// button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
    for ( int k = 0;  k < shots; k++ )
 	 {
-		shots_count++;   //if(shots_count > shots){ shots_count = 0;}
-	    lcd_put_cur(2,13); lcd_int_to_str(shots_count);
-	for( int j =0; j < wait_sec; j++)
-	  {
-		 button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-	     if (button == 0) { pause_stop_fun(); }
-	     HAL_Delay(1);
-	  }
+		HAL_Delay(500);
+	    lcd_put_cur(1, 1); lcd_string_new(" ");
+	    shots_count++;   lcd_put_cur(2,13); lcd_int_to_str(shots_count);   //if(shots_count > shots){ shots_count = 0;}
+	    button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+	    if (button == 0) {pause_stop_fun();}
+	    HAL_Delay(500);
+	 	lcd_put_cur(1, 1); lcd_string_new("A");
+	 	button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+	 	if (button == 0) {pause_stop_fun();}
+	    // if (button == 0) {pause_stop_fun();}
+
 	 }
-	shots_count = 0;
-    HAL_Delay(50);
+
+  //   exit_flag = 0;
+
+//  }
+    shots_count = 0;
+   // HAL_Delay(50);
 }
 
     ///  animation pause and stop function during the animation mode
 
 void pause_stop_fun()
 {
-	pressed = 1;
-	lcd_clear(); lcd_put_cur(1, 5); lcd_string_new("PAUSE");  lcd_put_cur(1,14); lcd_int_to_str(shots);
+//	pressed = 1;
+	lcd_clear();
+	//direction = 'P';
+//	data_transmit();
+	lcd_put_cur(1, 5); lcd_string_new("PAUSE");
 	lcd_put_cur(2, 0); lcd_string_new("Press OK To Exit");
-    HAL_Delay(1000);
-  for (int m =0; m < 1000; m++) /////   button press second time to exit    /////
+    HAL_Delay(200);
+  for (int m =0; m < 1300; m++) /////   button press second time to exit    /////
   {
 	button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-	if(button == 0) { pressed = 0; } //  animation_fun();}
+	if(button == 0) { lcd_clear(); prev_row_pos = 2; ani_screen2(); } //  animation_fun();}
 	HAL_Delay(1);
   }
 
-   if (pressed == 1)
-   {
-	 lcd_clear();  step_start_fun();
-   }
-   else if (pressed == 0)
-   {
-	  lcd_clear(); row_pos = previous_pos; animation_fun();
-   }
-	 //step_start_fun();
+	 lcd_clear();
+	 lcd_put_cur(1, 1); lcd_string_new("ANIM dir");
+	 lcd_put_cur(1,9);  lcd_send_data(motor_move);
+	 ani_step_display();
+//	 direction = 'R';
+//	 data_transmit();
+	 // step_start_fun();           //step_start_fun();
+
   }
 
 
-//*********** CONFIG from the function *************///
+void animation_fun()
+{
+	working_mode = 'G';
+	direction = 'S';
+	data_transmit();
+    cursor_pos = 1;
+    animation_flag = 1;
+	row_pos = 0;
+	exit_flag = 1;
+	lcd_clear();
+	prev_row_pos = 0;
+	//home_pos = fixed_limit;
+
+    while ( animation_flag == 1  )
+    {
+
+	  // row_pos = prev_row_pos;
+	   ani_screen1();
+	   //screen_second();
+
+    }
+  }
+
+//----------------ANIMATION MODE END ------------------//
+
+
+
+//***********************************************************//
+
+//******** CONFIGURATION MODE  ***********//
+
+//***********************************************************//
+
 
 void config_fun(void)
 {
-
-  man_flag = 0;
-  unl_flag = 0;    // clear the unl flag to go back to calibration mode
-  live_flag = 0;
-  animation_flag = 0;
-  exit_flag = 0;
   lcd_clear();
-  re_calibration();  // back to the re calibration mode
-}
+//  man_flag = 0;
+//  unl_flag = 0;    // clear the unl flag to go back to calibration mode
+//  live_flag = 0;
+//  animation_flag = 0;
+   exit_flag = 1;
+   row_pos = 0;
+ // lcd_clear();
+ // re_calibration();  // back to the re calibration mode
+  //////////////////
+ //	while ( exit_flag == 1)
+//	{
+		lcd_put_cur(0, 1);  lcd_string_new("Info");  lcd_put_cur(1, 1); lcd_string_new("Back-Light");
+		lcd_put_cur(1, 12); lcd_string_new("   %");
+		lcd_put_cur(1, 12); lcd_int_to_str(back_light);
+		lcd_put_cur(2, 1);  lcd_string_new("Calibration");    lcd_put_cur(3, 1);   lcd_string_new("Back");
+		lcd_put_cur(row_pos,0);lcd_string_new(">");
+		HAL_Delay(250); // switch de bounce dealy
+
+
+  while (exit_flag == 1)
+  {
+	  button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+    	while( button != 0 )   // scanning button is pressed or not
+	{
+			 button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
+			 read_joystic();
+		 if ((y_value < 3450) && (y_value > 850))
+			 {
+			    j_toggle1 = 1;
+
+			   if ( row_pos == 1 ) {
+				  if (x_value <= 900) { read_joystic();
+					 if (back_light <= 90) {back_light = back_light + 10 ;}
+					 lcd_put_cur(1, 12); lcd_string_new("   %"); lcd_put_cur(1, 12); lcd_int_to_str(back_light);
+					 HAL_Delay(250);
+				 }
+				 else if (x_value >= 3000) {
+					 if (back_light >= 10 ) {back_light = back_light - 10;}
+				  	 lcd_put_cur(1, 12); lcd_string_new("   %"); lcd_put_cur(1, 12); lcd_int_to_str(back_light);
+					 HAL_Delay(250);
+				 }
+				 __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2,  back_light );
+			   }
+			 }
+
+		   else if ((y_value >= 3500 ) && (y_value <= 4095) && ( j_toggle1 == 1) )
+			{
+			    arrow_down();
+//			 j_toggle1 = 0;   //cursor_pos++;
+//			   lcd_put_cur(row_pos,0); lcd_string_new(" ");
+//			   row_pos++;  if (row_pos >= 4) { row_pos = 0; }
+//			   lcd_put_cur(row_pos,0); lcd_string_new(">");
+			}
+
+			else if ((y_value <= 800) && (y_value >= 0 ) && ( j_toggle1 == 1))
+			  {
+				 arrow_up();
+//			     j_toggle1 = 0;  //cursor_pos--;
+//				 lcd_put_cur(row_pos,0); lcd_string_new(" ");
+//				 row_pos--; if(row_pos == 255) { row_pos = 3; }
+//				 lcd_put_cur(row_pos,0);lcd_string_new(">");
+		     }
+         }
+
+    	read_joystic();
+    	HAL_Delay(250);
+    	       switch(row_pos)
+			  {
+					  case 0:
+						 // info();
+					  break;
+
+					  case 1:
+						  read_joystic();  // back_light();
+					  break;
+
+					  case 2:
+						   man_flag = 0;
+						   unl_flag = 0;    // clear the unl flag to go back to calibration mode
+						   live_flag = 0;
+						   animation_flag = 0;
+						   exit_flag = 1;
+						   re_calibration();
+					  break;
+
+					  case 3:  //back();
+					    exit_flag = 0;
+					  break;
+				}
+	     }
+            lcd_clear();
+            prev_row_pos = row_pos;
+
+    }
+
+//----------------CONFIGURATION MODE END ------------------//
 
 
 
-//*******************  Unlimited Limits function *******************
+//***********************************************************//
 
+//******** MAIN FUNCTION OF THE PROJECT ***********//
+
+//***********************************************************//
+
+//----------------START ------------------//
 
 void auto_unl()
 {
+	working_mode = 'G';
+    direction = 'S';
+	data_transmit();
 	exit_flag = 0;
 	unl_flag = 1;
 //	hold = 1;
-	row_pos = 0;
+//	row_pos = 0;
 	//lcd_put_cur(0, 0); lcd_string_new("** limits are **");
 	//lcd_put_cur(1, 0); lcd_string_new("** unlimited  **");
 	//HAL_Delay(500);
@@ -1360,9 +2102,10 @@ void auto_unl()
 
 	while ( unl_flag == 1)
 	{
+		row_pos = prev_row_pos;
 		lcd_put_cur(0, 1);lcd_string_new("LIVE");lcd_put_cur(1, 1); lcd_string_new("TIMELAPSE");
 		lcd_put_cur(2, 1);lcd_string_new("ANIMATION");lcd_put_cur(3, 1); lcd_string_new("CONFIG");
-		lcd_put_cur(0,0);lcd_string_new(">");
+		lcd_put_cur(row_pos,0);lcd_string_new(">");
 		HAL_Delay(500); // switch de bounce dealy
 
 		button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
@@ -1370,45 +2113,18 @@ void auto_unl()
 	    	while( button != 0 )   // scanning button is pressed or not
 		{
 			button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
-			read_joystic(); HAL_Delay(1);
+			read_joystic(); //HAL_Delay(1);
+			if ((y_value <= 2900) && (y_value > 1000))
+			{ j_toggle1 = 1; }
 
-//   if (y_value >= 3000)
-//    {
-//	   lcd_put_cur(row_pos,0); lcd_string_new(" ");
-//        row_pos++;
-//
-//        if (row_pos >= 4) { row_pos = 0; }
-//
-//      lcd_put_cur(row_pos,0);  lcd_string_new(">");
-//      HAL_Delay(200);
-//    }
+			else if ((y_value >= 3000 ) && (y_value <= 4095) && ( j_toggle1 == 1) )
+			{ arrow_down();  }
 
-   ////////////
+			else if ((y_value <= 800) && (y_value >= 0 ) && ( j_toggle1 == 1))
+			{ arrow_up();  	 }
 
-     if ((y_value <= 2900) && (y_value > 1000))
-       {
-   	   j_toggle1 = 1;  HAL_Delay(2);
-       }
+		}
 
-     else if ((y_value >= 3000 ) && (y_value <= 4095) && ( j_toggle1 == 1) )
-      {
-    	 j_toggle1 = 0;   //cursor_pos++;
-         lcd_put_cur(row_pos,0); lcd_string_new(" ");
-         row_pos++;  if (row_pos >= 4) { row_pos = 0; }
-         lcd_put_cur(row_pos,0); lcd_string_new(">");
-      }
-
-      else if ((y_value <= 800) && (y_value >= 0 ) && ( j_toggle1 == 1))
-        {
-    	 j_toggle1 = 0;  //cursor_pos--;
-   	     lcd_put_cur(row_pos,0); lcd_string_new(" ");
-   	     row_pos--; if(row_pos == 255) { row_pos = 3; }
-   	     lcd_put_cur(row_pos,0);lcd_string_new(">");
-        }
-
-    }
-
-  	  HAL_Delay(1);
 
   	  switch(row_pos)
   	  {
@@ -1434,22 +2150,24 @@ void auto_unl()
 
 
 
-
-
-
-//////// work range function and their sub functions
+//******** LIMTI SETTING OF THE MOTOR ***********//
 
 
 void man_fun()
 {
+    man_unl_mode = 'M';
+	//working_mode = 'L';
+    direction = 'S';
+    data_transmit();
 	lcd_clear();
 	HAL_Delay(300);  // button de bounce delay
-	man_mode = 0;
-    motor_count = current_motor_step; // limit 1 hold the current position of the motor
+	//man_mo = current_motde = 0;
+
+    motor_count = current_motor_step ;   // limit 1 hold the current position of the motor
 	lcd_put_cur(1, 0); lcd_string_new("1st Limit ");  //lcd_put_cur(1, 1); float_to_string(limit_1);
 //	lcd_put_cur(2, 0); lcd_string_new("<Move> & PressOK");
-	//data_display();
-//	disp_motor_step(motor_count);
+
+
 	button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
    // motor_limit = motor_step;
 
@@ -1482,7 +2200,7 @@ void man_fun()
 
 	 else if ((x_value >= 3000)  &&  (x_value <= 4095)) // 1st limit decrement
 	    {
-	       direction = 'R';
+	       direction = 'B';
 	       speed_send = map( x_value,  2100, 4000, 15, 1550) * motor_speed_pot / 100;
 	    }
     }
@@ -1522,7 +2240,7 @@ void man_fun()
 
    	 else if ((x_value >= 3000)  &&  (x_value <= 4095)) // 1st limit decrement
    	    {
-   	       direction = 'R';
+   	       direction = 'B';
    	       speed_send = map( x_value,  2100, 4000, 15, 1550) * motor_speed_pot / 100;
    	    }
    }
@@ -1530,9 +2248,22 @@ void man_fun()
       //   limit_2 = motor_count;    // note the maximum limit of the motor
           limit_2 = rx_motor_step;
  // ****** calculation of the motor steps from limit_1 to limit_2
+
+
+
          //current_motor_step = motor_step;  // motor current position store
+
          motor_limit = limit_2 - limit_1;
+
+         // find out the limit is in negative or in possitive direction
+
+         if (motor_limit < 0) { limit_status =  '-'; }
+         else if (motor_limit >= 0) { limit_status = '+'; }
+
+         // if limit is negative then convert it into possitive
+         motor_limit = labs(motor_limit);
          fixed_limit = motor_limit / 10.0;
+
          lcd_clear();
          lcd_put_cur(1, 0);  lcd_string_new("** limits are **");
          lcd_put_cur(2, 2);  lcd_string_new("0  to");
@@ -1550,15 +2281,17 @@ void man_fun()
          }
 
      /////////////// send set limit to the slave device///////
+             working_mode = 'L';
              send_motor_limit();
      	     rx_data();
      	     current_motor_step = motor_step;
-     	     HAL_Delay(700);
-     	     send_buffer[7] = 0x00;
+    	     HAL_Delay(700);
+//     	     send_buffer[7] = 0x00;
              lcd_clear();
 
 // ********  call to free_ride_fun function
-            man_flag = 1;
+              man_flag = 1;
+              prev_row_pos = 0;
           //  auto_unl();    // unl_flag = 1;  // set the unl flag 1 to call the unlimited limit function
            // HAL_Delay(1000);
 
@@ -1566,18 +2299,25 @@ void man_fun()
 
 //********* UNL Function ************
 
-void unl_fun()
-{
-	hold = 0;
-	lcd_clear();
-	HAL_Delay(1);
-	auto_unl();   // call to the aut_unl function again
+//void unl_fun()
+//{
+//	hold = 0;
+//	lcd_clear();
 //	HAL_Delay(1);
+//	auto_unl();   // call to the aut_unl function again
+////	HAL_Delay(1);
+//
+//}
 
-}
+
+
+//********  SELECT LIMTI OR UNLIMITED MODE  ***********//
+
+
 
  void work_range()
  {
+
   //  hold = 1;
     int cur_pos = 1;
     lcd_put_cur(1, 3);lcd_string_new("WORK");lcd_put_cur(1, 8); lcd_string_new("RANGE");
@@ -1612,7 +2352,9 @@ while (  button != 0 )
         case 2:
           lcd_clear(); lcd_put_cur(1, 0); lcd_string_new("** limits are **");
           lcd_put_cur(2, 0); lcd_string_new("** unlimited  **");
-          HAL_Delay(1500);  auto_unl(); HAL_Delay(1);
+          HAL_Delay(1500);
+          man_unl_mode = 'U';
+          auto_unl();
     	  //unl_flag = 1; man_flag = 0;  break;
          break ;
       }
@@ -1630,12 +2372,27 @@ while (  button != 0 )
 
 
 
- //*********** Re-Calibration Function **************//
+
+
+
+//***********************************************************//
+
+//*********** RE-CALIBRATION FUNCTION **************//
+
+//***********************************************************//
+
+ //----------------START ------------------//
 
  void re_calibration()
  {
+	 lcd_clear();
+     working_mode = 'C';
+     direction = 'S';
+     data_transmit();
+   	 lcd_put_cur(1, 1);  lcd_string_new("RE-CALIBRATE?");
+   	 lcd_put_cur(2, 2);  lcd_string_new("<NO>");
+   	 lcd_put_cur(2, 9);  lcd_string_new(" YES ");
 
-	 home_scr();
 	 HAL_Delay(500);  // button de bounce dealy
 	 button = HAL_GPIO_ReadPin(jbtn_GPIO_Port, joy_btn_Pin);
 	 j_toggle = 1;
@@ -1668,10 +2425,10 @@ while (  button != 0 )
 	 		switch (home)
 	 	  {
 	 		case 1:
-	 			lcd_clear(); //jpos = 1;
+	 			 lcd_clear();
 	 			 lcd_put_cur(1, 0); lcd_string_new("** limits are **");
 	 			 lcd_put_cur(2, 0); lcd_string_new("** unlimited  **");
-	 			 HAL_Delay(1500);  auto_unl(); //HAL_Delay(5);
+	 			 HAL_Delay(500);  man_unl_mode = 'U';  auto_unl();    //  HAL_Delay(5);
 	 			break;
 
 	 		case 2:
@@ -1681,6 +2438,9 @@ while (  button != 0 )
    			 break;
 	 	  }
  }
+
+
+ //----------------END ------------------//
 
 
 
@@ -1717,6 +2477,7 @@ int main(void)
   MX_ADC1_Init();
   MX_SPI1_Init();
   MX_USART1_UART_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
 
   lcd_init();
@@ -1727,18 +2488,39 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
+
+   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
+ __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, back_light);
+
+
   HAL_GPIO_WritePin(GPIOB, LCD_BRIGHTNESS_Pin, 1);
   HAL_GPIO_WritePin(jbtn_GPIO_Port, joy_btn_Pin, 1);
 
   lcd_put_cur(1, 0); lcd_string_new("CAMERA SLIDER 03");
   lcd_put_cur(2, 0); lcd_string_new("ROUND SHAPE SLIDE");
-  HAL_Delay(2000); lcd_clear();
+  HAL_Delay(500); lcd_clear();
+//  lcd_put_cur(0, 2); lcd_string_new("Device-Info");
+//  lcd_put_cur(2, 0); lcd_string_new("                     ");
+//  HAL_Delay(1000); lcd_clear();
 
+//  HAL_GPIO_WritePin(GPIOB, RJ45_LED_G_Pin, 0);
+//  HAL_Delay(500);
+//  HAL_GPIO_WritePin(GPIOB, RJ45_LED_G_Pin, 1);
+//  HAL_Delay(500);
 
   while (1)
   {
 
+
+
+
 	//*****************
+
+//      current_motor_step = eeprom_step;  // get previous motor position  from EEPROM
+//      man_unl_mode =  eeprom_mu;             // get the previous status of  the MAN or UNL mode
+//      data_transmit();
+
+	//****  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, back_light);
 
 	  re_calibration();
 
@@ -1774,7 +2556,7 @@ void SystemClock_Config(void)
   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
+  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV2;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
@@ -1891,6 +2673,65 @@ static void MX_SPI1_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 72-1;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 100-1;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+  HAL_TIM_MspPostInit(&htim2);
+
+}
+
+/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -1941,29 +2782,29 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, LED_Pin|LCD_BRIGHTNESS_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, SPI1_CS_Pin|JS_SW_Pin|RJ45_LED_G_Pin|RJ45_LED_Y_Pin
-                          |LCD_BRIGHTNESS_Pin|LCD_RS_Pin|LCD_E_Pin|LCD_D4_Pin
-                          |LCD_D5_Pin|LCD_D6_Pin|LCD_D7_Pin, GPIO_PIN_RESET);
+                          |LCD_RS_Pin|LCD_E_Pin|LCD_D4_Pin|LCD_D5_Pin
+                          |LCD_D6_Pin|LCD_D7_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(MAX_EN_GPIO_Port, MAX_EN_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : LED_Pin */
-  GPIO_InitStruct.Pin = LED_Pin;
+  /*Configure GPIO pins : LED_Pin LCD_BRIGHTNESS_Pin */
+  GPIO_InitStruct.Pin = LED_Pin|LCD_BRIGHTNESS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LED_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pins : SPI1_CS_Pin JS_SW_Pin RJ45_LED_G_Pin RJ45_LED_Y_Pin
-                           LCD_BRIGHTNESS_Pin LCD_RS_Pin LCD_E_Pin LCD_D4_Pin
-                           LCD_D5_Pin LCD_D6_Pin LCD_D7_Pin */
+                           LCD_RS_Pin LCD_E_Pin LCD_D4_Pin LCD_D5_Pin
+                           LCD_D6_Pin LCD_D7_Pin */
   GPIO_InitStruct.Pin = SPI1_CS_Pin|JS_SW_Pin|RJ45_LED_G_Pin|RJ45_LED_Y_Pin
-                          |LCD_BRIGHTNESS_Pin|LCD_RS_Pin|LCD_E_Pin|LCD_D4_Pin
-                          |LCD_D5_Pin|LCD_D6_Pin|LCD_D7_Pin;
+                          |LCD_RS_Pin|LCD_E_Pin|LCD_D4_Pin|LCD_D5_Pin
+                          |LCD_D6_Pin|LCD_D7_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
